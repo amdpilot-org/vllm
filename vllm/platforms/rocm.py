@@ -197,6 +197,14 @@ _ON_GFX90A = "gfx90a" in _GCN_ARCH
 _ON_GFX942 = "gfx942" in _GCN_ARCH
 _ON_GFX950 = "gfx950" in _GCN_ARCH
 
+# Gate AITER FP4BMM on gfx942: MXFP4 is unsupported on this hardware.
+if _ON_GFX942 and "VLLM_ROCM_USE_AITER_FP4BMM" not in os.environ:
+    os.environ["VLLM_ROCM_USE_AITER_FP4BMM"] = "0"
+    logger.warning(
+        "Disabling VLLM_ROCM_USE_AITER_FP4BMM on gfx942: "
+        "MXFP4 not supported by this hardware. Set =1 explicitly to override."
+    )
+
 
 def _capability_from_gcn_arch(gcn_arch: str) -> tuple[int, int] | None:
     """

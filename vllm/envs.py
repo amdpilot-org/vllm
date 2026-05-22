@@ -122,7 +122,7 @@ if TYPE_CHECKING:
     VLLM_ROCM_USE_AITER_FP4_ASM_GEMM: bool = False
     VLLM_ROCM_USE_AITER_TRITON_ROPE: bool = False
     VLLM_ROCM_USE_AITER_FP8BMM: bool = True
-    VLLM_ROCM_USE_AITER_FP4BMM: bool = True
+    VLLM_ROCM_USE_AITER_FP4BMM: bool
     VLLM_ROCM_USE_AITER_UNIFIED_ATTENTION: bool = False
     VLLM_ROCM_USE_AITER_FUSION_SHARED_EXPERTS: bool = False
     VLLM_ROCM_USE_AITER_TRITON_GEMM: bool = True
@@ -539,6 +539,28 @@ def get_env_or_set_default(
 # --8<-- [start:env-vars-definition]
 
 logger = logging.getLogger(__name__)
+
+
+def _get_aiter_fp4bmm_default() -> str:
+    """Return the effective default for VLLM_ROCM_USE_AITER_FP4BMM.
+
+    On gfx942 we disable it automatically because MXFP4 is not supported.
+    Explicit overrides via the environment are always preserved.
+    """
+    if "VLLM_ROCM_USE_AITER_FP4BMM" in os.environ:
+        return os.environ["VLLM_ROCM_USE_AITER_FP4BMM"]
+    try:
+        import torch.cuda
+        props = torch.cuda.get_device_properties("cuda")
+        gcn_arch = getattr(props, "gcnArchName", "")
+    except Exception:
+        gcn_arch = ""
+    if "gfx942" in gcn_arch:
+        logger.warning(
+            "Disabling VLLM_ROCM_USE_AITER_FP4BMM on gfx942: MXFP4 not supported by this hardware. Set =1 explicitly to override."
+        )
+        return "False"
+    return "True"
 
 
 def _resolve_rust_frontend_path() -> str | None:
@@ -1137,9 +1159,10 @@ environment_variables: dict[str, Callable[[], Any]] = {
         os.getenv("VLLM_ROCM_USE_AITER_FP8BMM", "True").lower() in ("true", "1")
     ),
     # Whether to use aiter triton fp4 bmm kernel
-    # By default is enabled.
+    # By default is enabled (gated to False on gfx942 because MXFP4 is unsupported).
     "VLLM_ROCM_USE_AITER_FP4BMM": lambda: (
-        os.getenv("VLLM_ROCM_USE_AITER_FP4BMM", "True").lower() in ("true", "1")
+        os.getenv("VLLM_ROCM_USE_AITER_FP4BMM", _get_aiter_fp4bmm_default()).lower()
+        in ("true", "1")
     ),
     # Use AITER triton unified attention for V1 attention
     "VLLM_ROCM_USE_AITER_UNIFIED_ATTENTION": lambda: (

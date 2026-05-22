@@ -551,6 +551,20 @@ def _resolve_rust_frontend_path() -> str | None:
     return raw
 
 
+def _resolve_fp4bmm_default() -> bool:
+    if "VLLM_ROCM_USE_AITER_FP4BMM" in os.environ:
+        val = os.getenv("VLLM_ROCM_USE_AITER_FP4BMM")
+        return val.lower() in ("true", "1") if val else False
+    try:
+        from vllm.platforms.rocm import on_gfx942
+        if on_gfx942():
+            logger.warning("Disabling VLLM_ROCM_USE_AITER_FP4BMM on gfx942: MXFP4 not supported by this hardware. Set =1 explicitly to override.")
+            return False
+    except Exception:
+        pass
+    return True
+
+
 environment_variables: dict[str, Callable[[], Any]] = {
     # ================== Installation Time Env Vars ==================
     # Target device of vLLM, supporting [cuda (by default),
@@ -1108,10 +1122,8 @@ environment_variables: dict[str, Callable[[], Any]] = {
         os.getenv("VLLM_ROCM_USE_AITER_FP8BMM", "True").lower() in ("true", "1")
     ),
     # Whether to use aiter triton fp4 bmm kernel
-    # By default is enabled.
-    "VLLM_ROCM_USE_AITER_FP4BMM": lambda: (
-        os.getenv("VLLM_ROCM_USE_AITER_FP4BMM", "True").lower() in ("true", "1")
-    ),
+    # By default is enabled, except on gfx942 where MXFP4 is unsupported.
+    "VLLM_ROCM_USE_AITER_FP4BMM": _resolve_fp4bmm_default,
     # Use AITER triton unified attention for V1 attention
     "VLLM_ROCM_USE_AITER_UNIFIED_ATTENTION": lambda: (
         os.getenv("VLLM_ROCM_USE_AITER_UNIFIED_ATTENTION", "False").lower()

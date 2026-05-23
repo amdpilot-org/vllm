@@ -574,6 +574,29 @@ def _resolve_rust_frontend_path() -> str | None:
     return raw
 
 
+def _resolve_vllm_rocm_use_aiter_fp4bmm() -> bool:
+    """Resolve VLLM_ROCM_USE_AITER_FP4BMM with gfx942-aware default.
+
+    On gfx942 (MI300X/MI300A), MXFP4 is not supported, so we default to
+    disabled unless the user explicitly sets VLLM_ROCM_USE_AITER_FP4BMM=1.
+    """
+    # Explicit user override always wins
+    if "VLLM_ROCM_USE_AITER_FP4BMM" in os.environ:
+        return os.environ["VLLM_ROCM_USE_AITER_FP4BMM"].lower() in ("true", "1")
+    # Default: check if we're on gfx942 where MXFP4 is unsupported
+    try:
+        import torch.cuda
+
+        if torch.cuda.is_available():
+            gcn_arch = torch.cuda.get_device_properties("cuda").gcnArchName
+            if "gfx942" in gcn_arch:
+                logger.warning("Disabling VLLM_ROCM_USE_AITER_FP4BMM on gfx942: MXFP4 not supported by this hardware. Set =1 explicitly to override.")
+                return False
+    except Exception:
+        pass
+    return True
+
+
 environment_variables: dict[str, Callable[[], Any]] = {
     # ================== Installation Time Env Vars ==================
     # Target device of vLLM, supporting [cuda (by default),
@@ -1138,9 +1161,7 @@ environment_variables: dict[str, Callable[[], Any]] = {
     ),
     # Whether to use aiter triton fp4 bmm kernel
     # By default is enabled.
-    "VLLM_ROCM_USE_AITER_FP4BMM": lambda: (
-        os.getenv("VLLM_ROCM_USE_AITER_FP4BMM", "True").lower() in ("true", "1")
-    ),
+    "VLLM_ROCM_USE_AITER_FP4BMM": _resolve_vllm_rocm_use_aiter_fp4bmm,
     # Use AITER triton unified attention for V1 attention
     "VLLM_ROCM_USE_AITER_UNIFIED_ATTENTION": lambda: (
         os.getenv("VLLM_ROCM_USE_AITER_UNIFIED_ATTENTION", "False").lower()

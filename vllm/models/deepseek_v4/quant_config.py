@@ -60,8 +60,8 @@ class DeepseekV4FP8Config(Fp8Config):
             except Exception:
                 # vllm_config not yet set; defer the decision until a
                 # later call lands inside set_current_vllm_config.
-                return "fp4"
-            expert_dtype = getattr(hf_config, "expert_dtype", "fp4")
+                return "fp8"
+            expert_dtype = getattr(hf_config, "expert_dtype", "fp8")
             if expert_dtype not in _DEEPSEEK_V4_EXPERT_DTYPES:
                 raise ValueError(
                     f"Unsupported DeepSeek V4 expert_dtype={expert_dtype!r}; "

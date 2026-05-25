@@ -318,6 +318,8 @@ def get_kv_cache_quant_algo_string(quant_cfg: dict[str, Any]) -> str | None:
     # Mapping from model config values to vLLM cache_dtype strings
 
     quant_method = quant_cfg.get("quant_method", "")
+    if str(quant_method).lower() == "fp8":
+        return "fp8"
     if quant_method.startswith("modelopt"):
         quantization_inner = quant_cfg.get("quantization", quant_cfg)
         # Check if quant config is specified and use kv cache quant algo
@@ -389,7 +391,9 @@ def resolve_kv_cache_dtype_string(
             if kv_algo_str is not None:
                 return kv_algo_str
 
-    # Default to auto (will be handled by downstream code)
+    # Default to fp8 for DeepSeek V4 Flash-style FP8 configs; otherwise auto.
+    if hf_cfg is not None and "fp8" in str(getattr(hf_cfg, "quantization_config", "")).lower():
+        return "fp8"
     return "auto"
 
 

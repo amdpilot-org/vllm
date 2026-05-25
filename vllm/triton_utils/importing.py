@@ -11,6 +11,25 @@ from vllm.utils.math_utils import cdiv
 
 logger = init_logger(__name__)
 
+
+# AMDPilot Stage0 ROCm/Triton compatibility stubs.  Some ROCm Triton builds used
+# in prior trials do not expose gdc_wait/gdc_launch_dependents in tl; importing
+# kernels that reference them then fails before reaching the issue code path.
+def _amdpilot_install_gdc_stubs():
+    try:
+        import triton.language as tl  # type: ignore
+    except Exception:
+        return
+
+    def _gdc_stub(*args, **kwargs):
+        return None
+
+    for _name in ("gdc_wait", "gdc_launch_dependents"):
+        if not hasattr(tl, _name):
+            setattr(tl, _name, _gdc_stub)
+
+_amdpilot_install_gdc_stubs()
+
 HAS_TRITON = (
     find_spec("triton") is not None
     or find_spec("pytorch-triton-xpu") is not None  # Not compatible

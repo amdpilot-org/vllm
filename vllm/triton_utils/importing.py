@@ -116,3 +116,14 @@ class TritonLanguagePlaceholder(types.ModuleType):
         self.exp2 = None
         self.log = None
         self.log2 = None
+
+
+# AMDPilot Stage0 ROCm compatibility stubs: some Triton JIT paths import
+# CUDA GDC symbols that are not provided on this ROCm image. They are no-ops
+# for the synthetic LoRA baseline and unblock import-time checks.
+def gdc_wait(*args, **kwargs):
+    return None
+
+
+def gdc_launch_dependents(*args, **kwargs):
+    return None

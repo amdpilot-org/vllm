@@ -282,6 +282,34 @@ if TYPE_CHECKING:
     VLLM_NIC_SELECTION_VARS: str = ""
 
 
+def _get_rocm_use_aiter_fp4bmm_default() -> bool:
+    """Return whether FP4BMM should be enabled by default on this ROCm GPU.
+
+    MXFP4 quantization is only supported on gfx950 (MI355X).
+    On gfx942 (MI300X / MI300A / MI325X) the unconditional True default
+    causes a RuntimeError at model-load time; we therefore auto-disable it
+    and emit a one-line warning so users know why and how to override.
+    """
+    env_val = os.getenv("VLLM_ROCM_USE_AITER_FP4BMM")
+    if env_val is not None:
+        # User explicitly set the flag — respect it unconditionally.
+        return env_val.lower() in ("true", "1")
+    try:
+        import torch
+        if torch.cuda.is_available() and torch.version.hip:
+            gcn = torch.cuda.get_device_properties("cuda").gcnArchName
+            if "gfx950" not in gcn:
+                logging.getLogger("vllm.envs").warning(
+                    "Disabling VLLM_ROCM_USE_AITER_FP4BMM on %s: "
+                    "MXFP4 not supported by this hardware. "
+                    "Set =1 explicitly to override.", gcn)
+                return False
+    except Exception:
+        pass
+    # Default to True on non-ROCm or if we cannot detect the arch.
+    return True
+
+
 def get_default_cache_root():
     return os.getenv(
         "XDG_CACHE_HOME",
@@ -1147,10 +1175,8 @@ environment_variables: dict[str, Callable[[], Any]] = {
         os.getenv("VLLM_ROCM_USE_AITER_FP8BMM", "True").lower() in ("true", "1")
     ),
     # Whether to use aiter triton fp4 bmm kernel
-    # By default is enabled.
-    "VLLM_ROCM_USE_AITER_FP4BMM": lambda: (
-        os.getenv("VLLM_ROCM_USE_AITER_FP4BMM", "True").lower() in ("true", "1")
-    ),
+    # Auto-detects hardware capability: enabled by default only on gfx950.
+    "VLLM_ROCM_USE_AITER_FP4BMM": lambda: (_get_rocm_use_aiter_fp4bmm_default()),
     # Use AITER triton unified attention for V1 attention
     "VLLM_ROCM_USE_AITER_UNIFIED_ATTENTION": lambda: (
         os.getenv("VLLM_ROCM_USE_AITER_UNIFIED_ATTENTION", "False").lower()

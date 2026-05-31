@@ -282,6 +282,9 @@ if TYPE_CHECKING:
     VLLM_NIC_SELECTION_VARS: str = ""
 
 
+_warned_archs: set[str] = set()
+
+
 def _get_rocm_use_aiter_fp4bmm_default() -> bool:
     """Return whether FP4BMM should be enabled by default on this ROCm GPU.
 
@@ -299,10 +302,12 @@ def _get_rocm_use_aiter_fp4bmm_default() -> bool:
         if torch.cuda.is_available() and torch.version.hip:
             gcn = torch.cuda.get_device_properties("cuda").gcnArchName
             if "gfx950" not in gcn:
-                logging.getLogger("vllm.envs").warning(
-                    "Disabling VLLM_ROCM_USE_AITER_FP4BMM on %s: "
-                    "MXFP4 not supported by this hardware. "
-                    "Set =1 explicitly to override.", gcn)
+                if gcn not in _warned_archs:
+                    _warned_archs.add(gcn)
+                    logging.getLogger("vllm.envs").warning(
+                        "Disabling VLLM_ROCM_USE_AITER_FP4BMM on %s: "
+                        "MXFP4 not supported by this hardware. "
+                        "Set =1 explicitly to override.", gcn)
                 return False
     except Exception:
         pass
@@ -2059,11 +2064,12 @@ def disable_envs_cache() -> None:
     Resets the environment variables cache. It could be used to isolate environments
     between unit tests.
     """
-    global __getattr__
+    global __getattr__, _warned_archs
     # If __getattr__ is wrapped by functions.cache, unwrap the caching layer.
     if _is_envs_cache_enabled():
         assert hasattr(__getattr__, "__wrapped__")
         __getattr__ = __getattr__.__wrapped__
+    _warned_archs.clear()
 
 
 def __dir__():

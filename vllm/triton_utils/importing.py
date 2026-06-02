@@ -116,3 +116,13 @@ class TritonLanguagePlaceholder(types.ModuleType):
         self.exp2 = None
         self.log = None
         self.log2 = None
+
+
+# Stage0 ROCm compatibility stubs for gdc_wait/gdc_launch_dependents.
+# These are no-op guards for ROCm Triton JIT import compatibility only.
+def gdc_wait(*args, **kwargs):
+    return None
+
+
+def gdc_launch_dependents(*args, **kwargs):
+    return None

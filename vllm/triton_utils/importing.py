@@ -116,3 +116,12 @@ class TritonLanguagePlaceholder(types.ModuleType):
         self.exp2 = None
         self.log = None
         self.log2 = None
+
+
+# AMDPILOT_STAGE0_GDC_STUBS: environment-only ROCm Triton JIT compatibility.
+def gdc_wait(*args, **kwargs):
+    return None
+
+
+def gdc_launch_dependents(*args, **kwargs):
+    return None

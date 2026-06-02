@@ -77,6 +77,24 @@ if HAS_TRITON:
         )
         HAS_TRITON = False
 
+
+# AMDPILOT Stage0 ROCm Triton compatibility: provide no-op CUDA GDC helpers
+# when Triton exposes tl.extra.cuda but not these NVIDIA-only symbols.
+def _amdpilot_install_gdc_stubs():
+    try:
+        import triton.language as tl
+        cuda_extra = getattr(getattr(tl, "extra", None), "cuda", None)
+        if cuda_extra is None:
+            return
+        if not hasattr(cuda_extra, "gdc_wait"):
+            cuda_extra.gdc_wait = lambda *args, **kwargs: None
+        if not hasattr(cuda_extra, "gdc_launch_dependents"):
+            cuda_extra.gdc_launch_dependents = lambda *args, **kwargs: None
+    except Exception:
+        return
+
+_amdpilot_install_gdc_stubs()
+
 if not HAS_TRITON:
     logger.info(
         "Triton not installed or not compatible; certain GPU-related"

@@ -16,6 +16,37 @@ from .ScaledMMLinearKernel import (
 )
 
 
+def _select_wvsplittkq_cu_count(K: int, N: int,
+                            default_cu_count: int) -> int:
+    """Select a cu_count for the wvSplitKQ GEMM based on (K, N) shapes.
+
+    The wvSplitKQ path is taken only for decode (A.shape[0] <= 4) where B
+    is a per-tensor FP8 weight stored transposed as [K, N]. The default
+    `num_compute_units()` (304 on MI300X) is a good all-around choice, but a
+    finer sweep on the dominant Llama-3.3-70B FP8 decode shapes (M=4 in the
+    captured graph) shows a 2-4% wall-clock win with the values below. For
+    any other shape we fall back to `default_cu_count` so other models are not
+    regressed.
+
+      (K=8192,  N=10240)  -> 272  (qkv_proj,    ~-2.4% vs 304)
+      (K=8192,  N=8192)   -> 256  (o_proj,       ~-3.6% vs 304)
+      (K=8192,  N=128256) -> 288  (lm_head,      ~-2.3% vs 304)
+      (K=28672, N=8192)   -> 288  (down_proj,    ~-0.4% vs 304)
+      (K=8192,  N=57344)  -> 304  (gate_up_proj, no change)
+    """
+    if K == 8192:
+        if N == 10240:  # qkv_proj
+            return 272
+        if N == 8192:  # o_proj (square)
+            return 256
+        if N == 128256:  # lm_head
+            return 288
+        # gate_up_proj (N=57344) and others use the default.
+    elif K == 28672 and N == 8192:  # down_proj
+        return 288
+    return default_cu_count
+
+
 def rocm_per_tensor_float_w8a8_scaled_mm_impl(
     A: torch.Tensor,
     B: torch.Tensor,
@@ -30,13 +61,15 @@ def rocm_per_tensor_float_w8a8_scaled_mm_impl(
         and B.shape[1] % 16 == 0  # K
         and ((bias is None) or (bias.dtype == out_dtype))
     ):
+        cu_count = _select_wvsplittkq_cu_count(
+            A.shape[1], B.shape[1], num_compute_units())
         output = ops.wvSplitKQ(
             B.t(),
             A,
             out_dtype,
             As,
             Bs,
-            num_compute_units(),
+            cu_count,
             bias,
         )
     # Fallback

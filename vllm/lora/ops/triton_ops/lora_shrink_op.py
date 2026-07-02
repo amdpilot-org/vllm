@@ -189,7 +189,8 @@ def _lora_shrink(
     assert lora_ids.size(0) == num_tokens_per_lora.size(0)
     assert lora_token_start_loc.size(0) == lora_ids.size(0) + 1
 
-    output_tensor.zero_()
+    # NOTE: output_tensor.zero_() is deferred to after SPLIT_K is known —
+    # it is only needed for the SPLIT_K > 1 (atomic_add) path.
 
     (lora_ptr_tensor, lora_strides_d0, lora_strides_d1, lora_strides_d2) = (
         _get_lora_a_ptr(lora_a_weights, inputs.device)
@@ -216,6 +217,13 @@ def _lora_shrink(
     NUM_CTAS = kernel_config["num_ctas"]
     GROUP_SIZE_M = kernel_config.get("group_size_m", 8)
     EVEN_K = K % (BLOCK_K * SPLIT_K) == 0  # type: ignore
+
+    # SPLIT_K == 1 uses tl.store (overwrite) in the kernel, so the output
+    # does not need zeroing. SPLIT_K > 1 uses tl.atomic_add and requires it.
+    # Skipping the zero_() avoids a redundant kernel launch — significant on
+    # AMD where the SGMV path is launch-overhead-bound (~16 us/launch).
+    if SPLIT_K > 1:
+        output_tensor.zero_()
 
     # TODO (varun): This grid formulation maximizes parallelization at the
     # cost of wasteful thread block launch when only few of the input tokens

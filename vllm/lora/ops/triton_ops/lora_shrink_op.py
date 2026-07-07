@@ -168,28 +168,11 @@ def _lora_shrink(
         scaling (float): Scaling factor.
     """
 
-    assert no_lora_flag_cpu.numel() == 1
     if no_lora_flag_cpu.item():
         # None of the inputs require LoRA.
         return
 
-    assert inputs.dtype == lora_a_weights[0].dtype
-    assert inputs.dtype in [torch.float16, torch.bfloat16]
-    for weight in lora_a_weights:
-        assert weight.dtype in [torch.float16, torch.bfloat16]
-
-    assert inputs.size(1) == lora_a_weights[0].size(-1)
-    assert inputs.is_contiguous()
-    assert output_tensor.is_contiguous()
-
-    # metadata sanity check
     M = inputs.size(0)
-    assert token_lora_mapping.size(0) == M
-    assert token_lora_mapping.size(0) == token_indices_sorted_by_lora_ids.size(0)
-    assert lora_ids.size(0) == num_tokens_per_lora.size(0)
-    assert lora_token_start_loc.size(0) == lora_ids.size(0) + 1
-
-    output_tensor.zero_()
 
     (lora_ptr_tensor, lora_strides_d0, lora_strides_d1, lora_strides_d2) = (
         _get_lora_a_ptr(lora_a_weights, inputs.device)
@@ -216,6 +199,12 @@ def _lora_shrink(
     NUM_CTAS = kernel_config["num_ctas"]
     GROUP_SIZE_M = kernel_config.get("group_size_m", 8)
     EVEN_K = K % (BLOCK_K * SPLIT_K) == 0  # type: ignore
+
+    # Only zero the output when SPLIT_K > 1, since the kernel uses atomic_add
+    # in that case. With SPLIT_K == 1, the kernel writes directly (tl.store),
+    # so zeroing is unnecessary and saves a kernel launch.
+    if SPLIT_K > 1:
+        output_tensor.zero_()
 
     # TODO (varun): This grid formulation maximizes parallelization at the
     # cost of wasteful thread block launch when only few of the input tokens

@@ -58,7 +58,11 @@ if HAS_TRITON:
             HAS_TRITON = False
 
         # Check Triton CPU
-        if "cpu" in version("vllm"):
+        try:
+            _vllm_ver = version("vllm")
+        except Exception:
+            _vllm_ver = ""
+        if "cpu" in _vllm_ver:
             if "cpu" in backends:
                 HAS_TRITON = True
             else:
@@ -123,3 +127,17 @@ class TritonLanguagePlaceholder(types.ModuleType):
         self.exp2 = None
         self.log = None
         self.log2 = None
+
+
+# ROCm compatibility: stub out CUDA-only Triton extras
+# tl.extra.cuda.gdc_wait / gdc_launch_dependents are CUDA-only.
+# On ROCm, even with USE_GDC=False, the JIT may try to resolve these.
+if HAS_TRITON:
+    try:
+        import triton.language.extra.cuda as _tl_cuda_extra
+        if not hasattr(_tl_cuda_extra, "gdc_wait"):
+            _tl_cuda_extra.gdc_wait = lambda *a, **kw: None
+        if not hasattr(_tl_cuda_extra, "gdc_launch_dependents"):
+            _tl_cuda_extra.gdc_launch_dependents = lambda *a, **kw: None
+    except (ImportError, AttributeError):
+        pass

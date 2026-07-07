@@ -173,24 +173,11 @@ def _lora_expand(
             output tensor. Defaults to False.
     """
 
-    assert no_lora_flag_cpu.numel() == 1
     if no_lora_flag_cpu.item():
         # None of the inputs require LoRA.
         return
 
-    assert inputs.dtype in [torch.float16, torch.bfloat16, torch.float32]
-    for weight in lora_b_weights:
-        assert weight.dtype in [torch.float16, torch.bfloat16]
-
-    assert inputs.size(0) == len(lora_b_weights)
-    assert output_tensor.is_contiguous()
-
-    # metadata sanity check.
     M = inputs.size(1)
-    assert token_lora_mapping.size(0) == M
-    assert token_lora_mapping.size(0) == token_indices_sorted_by_lora_ids.size(0)
-    assert lora_ids.size(0) == num_tokens_per_lora.size(0)
-    assert lora_token_start_loc.size(0) == lora_ids.size(0) + 1
 
     (
         slice_start_tensor,

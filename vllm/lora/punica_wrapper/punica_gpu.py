@@ -20,9 +20,23 @@ if HAS_TRITON:
     from vllm.lora.ops.triton_ops import (
         LoRAKernelMeta,
         fused_moe_lora,
-        lora_expand,
-        lora_shrink,
+        lora_expand as _triton_lora_expand,
+        lora_shrink as _triton_lora_shrink,
     )
+
+# AMD gfx95 (MI355X / MI350) SGMV dispatch: on gfx950 hardware route the
+# shrink/expand GEMVs through the AITER-backed ``segment_gemm_v`` path in
+# ``vllm.lora.kernels._amd_sgmv`` instead of the Triton fallback, so a single
+# engine can serve multiple LoRA adapters without per-adapter weight copies.
+from vllm.lora.kernels._amd_sgmv import is_gfx95 as _is_amd_gfx95
+if _is_amd_gfx95():
+    from vllm.lora.kernels._amd_sgmv import (
+        sgmv_expand as lora_expand,
+        sgmv_shrink as lora_shrink,
+    )
+elif HAS_TRITON:
+    lora_expand = _triton_lora_expand
+    lora_shrink = _triton_lora_shrink
 
 from vllm import _custom_ops as ops
 

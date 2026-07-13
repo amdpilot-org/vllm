@@ -329,10 +329,6 @@ def _get_backend_priorities(
 
     backends = []
 
-    # Priority 1: Check for AITER Unified Attention (must check before MHA)
-    if envs.VLLM_ROCM_USE_AITER and envs.VLLM_ROCM_USE_AITER_UNIFIED_ATTENTION:
-        backends.append(AttentionBackendEnum.ROCM_AITER_UNIFIED_ATTN)
-
     # Priority 2: Check for AITER MHA (Flash Attention)
     if envs.VLLM_ROCM_USE_AITER and envs.VLLM_ROCM_USE_AITER_MHA:
         backends.append(AttentionBackendEnum.ROCM_AITER_FA)
@@ -346,6 +342,10 @@ def _get_backend_priorities(
         and vllm_config.attention_config.use_prefill_decode_attention
     ):
         backends.append(AttentionBackendEnum.ROCM_ATTN)
+
+    # Priority 3b: Check for AITER Unified Attention (moved below ROCM_ATTN)
+    if envs.VLLM_ROCM_USE_AITER and envs.VLLM_ROCM_USE_AITER_UNIFIED_ATTENTION:
+        backends.append(AttentionBackendEnum.ROCM_AITER_UNIFIED_ATTN)
 
     # Default: Triton Unified Attention
     backends.append(AttentionBackendEnum.TRITON_ATTN)

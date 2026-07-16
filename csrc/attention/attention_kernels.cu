@@ -959,7 +959,7 @@ __global__ __launch_bounds__(NUM_THREADS,5) void paged_attention_ll4mi_QKV_mfma1
 
         const int hsz_maxp_mult = HEAD_SIZE * max_num_partitions; 
         scalar_t* out_ptr = out +
-                          seq_idx * total_num_heads * hsz_maxp_mult + partition_idx * HEAD_SIZE;
+                          (int64_t)seq_idx * total_num_heads * hsz_maxp_mult + partition_idx * HEAD_SIZE;
         for (int h = 0; h < GQA_RATIO4; h++) {
             const int local_head_idx = 4 * h + rowid;
             if (local_head_idx < GQA_RATIO) {
@@ -1995,7 +1995,7 @@ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_reduce_kernel(
     }
   }  // warpid == 0
   const scalar_t* tmp_out_ptr =
-      tmp_out + seq_idx * num_heads * max_num_partitions * HEAD_SIZE +
+      tmp_out + (int64_t)seq_idx * num_heads * max_num_partitions * HEAD_SIZE +
       head_idx * max_num_partitions * HEAD_SIZE + threadIdx.x;
   constexpr int MAX_NPAR = 64;
   scalar_t tmps[MAX_NPAR];

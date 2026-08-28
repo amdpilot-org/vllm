@@ -232,6 +232,64 @@ def attention_decode(
 
 
 # --------------------------------------------------------------------------- #
+# FP8 (e4m3) paged KV cache path.                                              #
+# --------------------------------------------------------------------------- #
+# vLLM's headline memory feature is an FP8 KV cache (README lists "FP8,
+# MXFP8/MXFP4"). This path stores the paged cache as float8_e4m3fn using vLLM's
+# exact layout rule (x = 16 // element_size => x=16 for 1-byte FP8) and gathers
+# it. NOTE: torch's fancy-index gather is NOT implemented for float8_e4m3fn on
+# this build ("normal_kernel_cuda not implemented"), so the gather is done by
+# viewing the FP8 cache as int8 (identical byte layout, identical element_size,
+# identical block-table indirection) -> gather int8 -> view back to fp8 -> cast
+# to bf16. This is a FAITHFUL measure of the HBM bytes FP8 moves (HBM is
+# dtype-agnostic; only byte count matters) but NOT of any FP8-specific kernel
+# fusion. vLLM's real kernel fuses gather+dequant+attention and uses per-token
+# scales; here dequant is a plain cast (scale=1.0, the no-scale case) -- named as
+# a simplification.
+def build_paged_cache_fp8(
+    num_blocks: int, num_kv_heads: int, head_size: int, block_size: int,
+    batch: int, max_blocks_per_seq: int, device: torch.device,
+) -> PagedKVCache:
+    elem_size = 1  # float8_e4m3fn
+    x = 16 // elem_size  # 16 for FP8 (mirrors vLLM split_kv_cache)
+    assert head_size % x == 0, f"head_size {head_size} must be divisible by x {x}"
+    key_cache = (torch.randn(
+        num_blocks, num_kv_heads, head_size // x, block_size, x,
+        dtype=torch.bfloat16, device=device) * 0.1).to(torch.float8_e4m3fn)
+    value_cache = (torch.randn(
+        num_blocks, num_kv_heads, head_size, block_size,
+        dtype=torch.bfloat16, device=device) * 0.1).to(torch.float8_e4m3fn)
+    block_table = torch.zeros(batch, max_blocks_per_seq, dtype=torch.int32, device=device)
+    perm = torch.randperm(num_blocks, device=device)[: batch * max_blocks_per_seq]
+    perm = perm.view(batch, max_blocks_per_seq)
+    for b in range(batch):
+        block_table[b] = perm[b][torch.randperm(max_blocks_per_seq, device=device)]
+    return PagedKVCache(key_cache, value_cache, block_table)
+
+
+def paged_gather_fp8(
+    cache: PagedKVCache, batch: int, num_kv_heads: int,
+    head_size: int, block_size: int, num_blocks_per_seq: int,
+    seq_len: int,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Gather FP8 KV via int8-view (faithful HBM bytes), dequant to bf16."""
+    bt = cache.block_table[:, :num_blocks_per_seq]
+    # K: view fp8 as int8, gather, view back to fp8
+    gk = cache.key_cache.view(torch.int8)[bt].view(torch.float8_e4m3fn)
+    # [batch, nblocks, Hkv, hs//x, B, x] -> [batch, Hkv, nblocks*B, hs]
+    gk = gk.permute(0, 2, 1, 4, 3, 5).reshape(
+        batch, num_kv_heads, num_blocks_per_seq * block_size, head_size
+    )
+    gv = cache.value_cache.view(torch.int8)[bt].view(torch.float8_e4m3fn)
+    gv = gv.permute(0, 2, 1, 4, 3).reshape(
+        batch, num_kv_heads, num_blocks_per_seq * block_size, head_size
+    )
+    gk = gk[:, :, :seq_len, :].to(torch.bfloat16).contiguous()
+    gv = gv[:, :, :seq_len, :].to(torch.bfloat16).contiguous()
+    return gk, gv
+
+
+# --------------------------------------------------------------------------- #
 # Correctness self-check: independent reference gather vs. the vectorized path. #
 # --------------------------------------------------------------------------- #
 def reference_gather_loop(
@@ -372,6 +430,8 @@ def main() -> int:
                     help="KV length(s) attended over during decode")
     ap.add_argument("--batch", type=int, nargs="+", default=[1, 4, 16, 64])
     ap.add_argument("--dtype", choices=["bfloat16", "float16"], default="bfloat16")
+    ap.add_argument("--fp8", action="store_true",
+                    help="also measure an FP8 (e4m3) paged KV-cache path")
     ap.add_argument("--warmup", type=int, default=20)
     ap.add_argument("--iters", type=int, default=100)
     ap.add_argument("--json", type=str, default=None, help="write results json")
@@ -468,6 +528,39 @@ def main() -> int:
             f_st = stats(f_ms)
             c_st = stats(c_ms)
 
+            # --- Optional FP8 KV-cache path ---
+            fp8_st = None
+            fp8_full_st = None
+            fp8_gather_speedup = float("nan")
+            fp8_full_speedup = float("nan")
+            if args.fp8:
+                cache_fp8 = build_paged_cache_fp8(
+                    num_blocks, args.num_kv_heads, args.head_size,
+                    args.block_size, batch, max_blocks_per_seq, device,
+                )
+
+                def fp8_gather_only():
+                    return paged_gather_fp8(
+                        cache_fp8, batch, args.num_kv_heads, args.head_size,
+                        args.block_size, num_blocks_per_seq, seq_len,
+                    )
+
+                def fp8_full_decode():
+                    k8, v8 = paged_gather_fp8(
+                        cache_fp8, batch, args.num_kv_heads, args.head_size,
+                        args.block_size, num_blocks_per_seq, seq_len,
+                    )
+                    return attention_decode(query, k8, v8, scale)
+
+                fg_ms = time_op(fp8_gather_only, args.warmup, args.iters)
+                ff_ms = time_op(fp8_full_decode, args.warmup, args.iters)
+                fp8_st = stats(fg_ms)
+                fp8_full_st = stats(ff_ms)
+                if fp8_st["median_ms"] > 0:
+                    fp8_gather_speedup = g_st["median_ms"] / fp8_st["median_ms"]
+                if fp8_full_st["median_ms"] > 0:
+                    fp8_full_speedup = f_st["median_ms"] / fp8_full_st["median_ms"]
+
             # derived throughput: decode produces `batch` tokens per full decode
             total_ms = f_st["median_ms"]
             tok_per_s = batch / (total_ms / 1e3) if total_ms > 0 else float("nan")
@@ -492,6 +585,10 @@ def main() -> int:
                 "attention_sdpa": a_st,
                 "full_decode": f_st,
                 "contiguous_only": c_st,
+                "fp8_gather": fp8_st,
+                "fp8_full_decode": fp8_full_st,
+                "fp8_gather_speedup_vs_bf16": fp8_gather_speedup,
+                "fp8_full_speedup_vs_bf16": fp8_full_speedup,
                 "paging_overhead_pct": paging_overhead_pct,
                 "gather_as_pct_of_contiguous": gather_overhead_pct,
                 "tokens_per_s_median": tok_per_s,
@@ -524,6 +621,13 @@ def main() -> int:
             print(f"  paging cost  : full_decode is {paging_overhead_pct:,.0f}% "
                   f"slower than contiguous-only (gather alone = "
                   f"{gather_overhead_pct:,.0f}% of contiguous attn)")
+            if args.fp8:
+                print(f"  fp8 gather   : median {fp8_st['median_ms']:.4f} ms  "
+                      f"(mean {fp8_st['mean_ms']:.4f}, cv {fp8_st['cv_pct']:.2f}%)  "
+                      f"| {fp8_gather_speedup:.2f}x bf16 gather")
+                print(f"  fp8 full     : median {fp8_full_st['median_ms']:.4f} ms  "
+                      f"(mean {fp8_full_st['mean_ms']:.4f}, cv {fp8_full_st['cv_pct']:.2f}%)  "
+                      f"| {fp8_full_speedup:.2f}x bf16 full_decode")
 
     print("\n" + "=" * 78)
     print("NOTE: full_decode = paged_gather + SDPA as separate PyTorch ops,")

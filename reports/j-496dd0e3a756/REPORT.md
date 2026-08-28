@@ -8,15 +8,19 @@ PyTorch 2.9.1+rocm7.2.0 / ROCm 7.2.0. vLLM's fused HIP kernel
 (`paged_attention_rocm`) cannot be imported without a build, so the operation
 is reimplemented **faithfully in pure PyTorch** using vLLM's exact paged
 KV-cache "flash" block layout, and timed with 200 CUDA-event samples after a
-30-iter warmup. All results are stable (coefficient of variation **≤ 2.8%**,
-mostly **< 1%**). At `seq_len=4096`, decode throughput saturates around
-**~24.5k decode tokens/s** (batch ≥ 16); the paged-gather data movement
-saturates around **~830 GB/s**. The reported `full_decode` time is an **upper
-bound** on vLLM's fused kernel (see Gaps).
+30-iter warmup. All results are stable (coefficient of variation **≤ 1.9%**,
+mostly **< 1%**).
 
 A **correctness self-check** verifies the paged gather against an independent
 loop-based reference gather: K/V match **bit-exact** (maxdiff = 0), and
-attention over gathered K/V matches attention over the reference (maxdiff = 0).
+attention over gathered K/V matches the reference (maxdiff = 0).
+
+A **contiguous-KV baseline** isolates the cost of paging itself: at
+`seq_len=4096`, block-table indirection roughly **doubles** decode latency at
+batch ≥ 16 (**+97% to +116%** over contiguous attention), while at batch 1 it
+is only **+26%** (launch-bound). The paged gather alone costs about as much as
+the entire contiguous attention at saturation — the signature cost of the
+operation vLLM is named for.
 
 ## The operation, and why it represents this project
 
@@ -81,14 +85,26 @@ the vectorized fancy-index + permute used in `paged_gather`) and compares:
 This verifies the block-layout permutation — the part of "faithful
 reimplementation" that is easy to get wrong — rather than merely asserting it.
 
-The script times three things per config, each with 30 warmup + 200 timed
+### Contiguous-KV baseline (isolates the cost of paging)
+
+For every config the script also times a **contiguous-only** path: identical
+GQA SDPA attention over a single pre-built contiguous
+`[batch, Hkv, seq_len, hs]` buffer with **no** block-table indirection. The
+delta between `full_decode` (paged) and `contiguous_only` is the **paging
+overhead** — the cost of the block-table data movement that defines
+PagedAttention. (Sanity cross-check: `contiguous_only` ≈ `attention_sdpa`, since
+both are SDPA over a contiguous buffer; they match within noise, confirming the
+attention compute is consistent between paths.)
+
+The script times four things per config, each with 30 warmup + 200 timed
 CUDA-event iterations:
 
-| component   | what it measures                                              |
-|-------------|---------------------------------------------------------------|
-| `gather`    | paged block-table gather → contiguous `[B, Hkv, S, hs]` K/V   |
-| `attention` | SDPA decode (Flash) over pre-gathered contiguous K/V          |
-| `full_decode` | `gather` + `attention` back-to-back (one decode step)       |
+| component      | what it measures                                              |
+|----------------|---------------------------------------------------------------|
+| `gather`       | paged block-table gather → contiguous `[B, Hkv, S, hs]` K/V  |
+| `attention`    | SDPA decode (Flash) over pre-gathered contiguous K/V         |
+| `full_decode`  | `gather` + `attention` back-to-back (one paged decode step)  |
+| `contiguous_only` | SDPA decode over a contiguous KV buffer (no paging)       |
 
 Config (Llama-3-class decode, TP=1): `head_size=128`, `num_heads=32`,
 `num_kv_heads=8`, `block_size=16` (vLLM `DEFAULT_BLOCK_SIZE`), `dtype=bfloat16`,
@@ -111,32 +127,32 @@ Config (Llama-3-class decode, TP=1): `head_size=128`, `num_heads=32`,
 
 All times in **ms**. Spread reported as `median | mean | min | max | std | p5 | p95 | cv%`.
 200 timed iterations after 30 warmup. `tok/s` = decode tokens / `full_decode` median.
-`BW` = KV bytes gathered / `gather` median (GB/s).
+`BW` = KV bytes gathered / `gather` median (GB/s). `paging overhead` = full_decode vs contiguous_only.
 
 ### Batch sweep — `seq_len = 4096`
 
-| batch | gather (med) | attention (med) | full_decode (med) | full cv% | tok/s | gather BW |
-|------:|-------------:|----------------:|------------------:|---------:|------:|----------:|
-| 1  | 0.0421 | 0.1516 | 0.1904 | 0.66 | 5,252 | 398 GB/s |
-| 4  | 0.0971 | 0.1525 | 0.2472 | 0.45 | 16,178 | 691 GB/s |
-| 16 | 0.3232 | 0.3048 | 0.6584 | 0.38 | 24,303 | 830 GB/s |
-| 64 | 1.2911 | 1.3269 | 2.6137 | 0.31 | 24,486 | 832 GB/s |
+| batch | gather (med) | attn (med) | full_decode (med) | contiguous (med) | paging overhead | tok/s | gather BW |
+|------:|-------------:|-----------:|------------------:|-----------------:|----------------:|------:|----------:|
+| 1  | 0.0431 | 0.1519 | 0.1908 | 0.1517 | **+26%** | 5,240 | 390 GB/s |
+| 4  | 0.0978 | 0.1523 | 0.2482 | 0.1524 | **+63%** | 16,116 | 688 GB/s |
+| 16 | 0.3230 | 0.3053 | 0.6582 | 0.3052 | **+116%** | 24,308 | 831 GB/s |
+| 64 | 1.2955 | 1.3252 | 2.6173 | 1.3274 | **+97%** | 24,454 | 830 GB/s |
 
 Full spread (`median|mean|min|max|std|p5|p95|cv%`) for `full_decode`:
 
-- batch 1 : `0.1904 | 0.1906 | 0.1890 | 0.2006 | 0.0013 | 0.1893 | 0.1923 | 0.66`
-- batch 4 : `0.2472 | 0.2474 | 0.2450 | 0.2547 | 0.0011 | 0.2459 | 0.2491 | 0.45`
-- batch 16: `0.6584 | 0.6583 | 0.6535 | 0.6651 | 0.0025 | 0.6544 | 0.6629 | 0.38`
-- batch 64: `2.6137 | 2.6143 | 2.5942 | 2.6354 | 0.0082 | 2.6004 | 2.6273 | 0.31`
+- batch 1 : `0.1908 | 0.1910 | 0.1888 | 0.1966 | 0.0011 | 0.1896 | 0.1930 | 0.59`
+- batch 4 : `0.2482 | 0.2484 | 0.2454 | 0.2545 | 0.0015 | 0.2463 | 0.2506 | 0.61`
+- batch 16: `0.6582 | 0.6582 | 0.6508 | 0.6682 | 0.0030 | 0.6532 | 0.6628 | 0.45`
+- batch 64: `2.6173 | 2.6174 | 2.6007 | 2.6342 | 0.0073 | 2.6052 | 2.6291 | 0.28`
 
 ### Sequence-length sweep — `batch = 16`
 
-| seq_len | gather (med) | attention (med) | full_decode (med) | full cv% | tok/s | gather BW |
-|--------:|-------------:|----------------:|------------------:|---------:|------:|----------:|
-| 1024 | 0.0971 | 0.0490 | 0.1432 | 0.74 | 111,731 | 691 GB/s |
-| 2048 | 0.1767 | 0.1591 | 0.3356 | 0.56 | 47,670 | 760 GB/s |
-| 4096 | 0.3229 | 0.3053 | 0.6581 | 0.45 | 24,314 | 831 GB/s |
-| 8192 | 0.6442 | 0.6604 | 1.3020 | 0.39 | 12,289 | 833 GB/s |
+| seq_len | gather (med) | attn (med) | full_decode (med) | contiguous (med) | paging overhead | tok/s | gather BW |
+|--------:|-------------:|-----------:|------------------:|-----------------:|----------------:|------:|----------:|
+| 1024 | 0.0957 | 0.0490 | 0.1434 | 0.0490 | **+193%** | 111,590 | 688 GB/s |
+| 2048 | 0.1770 | 0.1592 | 0.3336 | 0.1592 | **+110%** | 47,962 | 762 GB/s |
+| 4096 | 0.3235 | 0.3047 | 0.6578 | 0.3049 | **+116%** | 24,322 | 830 GB/s |
+| 8192 | 0.6451 | 0.6612 | 1.3041 | 0.6604 | **+97%** | 12,268 | 833 GB/s |
 
 `full_decode` time scales near-linearly with KV length (1024→8192 ≈ 8× the KV,
 9.1× the time), confirming the measurement is in a bandwidth/compute-bound
@@ -144,15 +160,17 @@ regime rather than launch-overhead-dominated (at batch 16).
 
 ### Interpretation
 
+- **Paging roughly doubles decode latency at saturation.** At batch ≥ 16,
+  the paged path is +97% to +116% slower than contiguous-only attention; the
+  overhead is dominated by the block-table gather, which alone costs about as
+  much as the entire contiguous attention. This is the signature cost of the
+  operation vLLM is named for, and it quantifies exactly what a fused kernel
+  (which removes the gather's intermediate materialisation) stands to recover.
 - **Throughput saturates at ~24.5k decode tokens/s** (batch ≥ 16, seq 4096): at
-  small batch the op is launch/latency bound (5.3k tok/s at batch 1); the GPU
-  only fills up around batch 16.
-- **The paged gather is ~half the decode cost** at batch 16+ (gather ≈ attention),
-  and its bandwidth plateaus at **~830 GB/s** — the signature cost of the
-  block-table data movement that defines PagedAttention.
-- **Attention (SDPA-Flash) and gather track each other** as batch/KV grows, so
-  neither is negligible; a fused kernel that removes the gather's intermediate
-  materialisation is where real vLLM gains over this baseline would come from.
+  small batch the op is launch/latency bound (5.2k tok/s at batch 1, where
+  paging overhead is only +26%); the GPU only fills up around batch 16.
+- **Paged-gather bandwidth plateaus at ~830 GB/s** — the data-movement cost of
+  the block-table indirection.
 
 ## Gaps and limitations (be explicit)
 
@@ -160,11 +178,13 @@ regime rather than launch-overhead-dominated (at batch 16).
   paged gather and the attention into one pass and never materialises a
   contiguous `[B, H, S, hs]` KV buffer. This script materialises that buffer,
   so `full_decode` here is an **upper bound** on the real kernel, not its
-  throughput. The `gather` number is, however, an honest measure of the paged
-  data-movement cost on this hardware.
+  throughput. The `gather` number and the **paging overhead** are, however,
+  honest measures of the paged data-movement cost on this hardware.
+- **The paging overhead is measured against PyTorch's SDPA contiguous path,
+  not a fused contiguous kernel.** A fused paged kernel that avoids
+  materialisation would narrow the gap; the +97–116% here is the gap for a
+  non-fused gather+attention implementation, not necessarily vLLM's.
 - **No build, so no apples-to-apples comparison** to `_rocm_C.paged_attention`.
-  The numbers characterise the *operation* (its data movement + attention
-  compute) on MI355X, not vLLM's specific fused-kernel performance.
 - **SDPA backend is PyTorch's Flash path**, not vLLM's tuned FlashAttention/CK
   MLA variants; decode-time attention here is therefore a proxy for the compute
   portion, optimised but not vLLM-specific.
@@ -173,7 +193,8 @@ regime rather than launch-overhead-dominated (at batch 16).
   exercised here.
 - **Block table is shuffled but synthetic.** Real serving has shared-prefix /
   cache-reuse locality that this synthetic workload does not model; the gather
-  BW is thus a *lower* bound on achievable locality benefit, not an upper.
+  BW and paging overhead are thus *lower* bounds on achievable locality benefit,
+  not upper.
 - **head_size=128 only.** Some models use head_size=64/96/256; not swept.
 
 If the chosen operation had not been measurable in budget, the simpler

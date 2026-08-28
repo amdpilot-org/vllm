@@ -447,13 +447,26 @@ def main() -> int:
                 )
                 return attention_decode(query, k, v, scale)
 
+            # Contiguous-KV baseline: identical attention compute over a single
+            # pre-built contiguous [batch, Hkv, seq_len, hs] buffer with NO
+            # block-table indirection. Isolates the cost of paging itself.
+            k_cont = torch.randn(batch, args.num_kv_heads, seq_len, args.head_size,
+                                 dtype=dtype, device=device) * 0.1
+            v_cont = torch.randn(batch, args.num_kv_heads, seq_len, args.head_size,
+                                 dtype=dtype, device=device) * 0.1
+
+            def contiguous_only():
+                return attention_decode(query, k_cont, v_cont, scale)
+
             g_ms = time_op(gather_only, args.warmup, args.iters)
             a_ms = time_op(attn_only, args.warmup, args.iters)
             f_ms = time_op(full_decode, args.warmup, args.iters)
+            c_ms = time_op(contiguous_only, args.warmup, args.iters)
 
             g_st = stats(g_ms)
             a_st = stats(a_ms)
             f_st = stats(f_ms)
+            c_st = stats(c_ms)
 
             # derived throughput: decode produces `batch` tokens per full decode
             total_ms = f_st["median_ms"]
@@ -464,6 +477,13 @@ def main() -> int:
             gather_bw_gbs = kv_bytes / (g_st["median_ms"] / 1e3) / 1e9 \
                 if g_st["median_ms"] > 0 else float("nan")
 
+            # paging overhead: how much slower is paged vs. contiguous-only
+            c_med = c_st["median_ms"]
+            f_med = f_st["median_ms"]
+            paging_overhead_pct = ((f_med - c_med) / c_med * 100.0)                 if c_med > 0 else float("nan")
+            # gather share of the paged decode's extra cost over contiguous
+            gather_overhead_pct = ((g_st["median_ms"] / c_med) * 100.0)                 if c_med > 0 else float("nan")
+
             run = {
                 "batch": batch,
                 "seq_len": seq_len,
@@ -471,6 +491,9 @@ def main() -> int:
                 "gather": g_st,
                 "attention_sdpa": a_st,
                 "full_decode": f_st,
+                "contiguous_only": c_st,
+                "paging_overhead_pct": paging_overhead_pct,
+                "gather_as_pct_of_contiguous": gather_overhead_pct,
                 "tokens_per_s_median": tok_per_s,
                 "kv_bytes_gathered": kv_bytes,
                 "gather_bandwidth_gbs_median": gather_bw_gbs,
@@ -491,9 +514,16 @@ def main() -> int:
                   f"(mean {f_st['mean_ms']:.4f}, min {f_st['min_ms']:.4f}, "
                   f"max {f_st['max_ms']:.4f}, std {f_st['std_ms']:.4f}, "
                   f"p5 {f_st['p5_ms']:.4f}, p95 {f_st['p95_ms']:.4f}, cv {f_st['cv_pct']:.2f}%)")
+            print(f"  contiguous   : median {c_st['median_ms']:.4f} ms  "
+                  f"(mean {c_st['mean_ms']:.4f}, min {c_st['min_ms']:.4f}, "
+                  f"max {c_st['max_ms']:.4f}, std {c_st['std_ms']:.4f}, "
+                  f"p5 {c_st['p5_ms']:.4f}, p95 {c_st['p95_ms']:.4f}, cv {c_st['cv_pct']:.2f}%)")
             print(f"  throughput   : {tok_per_s:,.0f} decode tokens/s | "
                   f"gather BW {gather_bw_gbs:,.1f} GB/s | "
                   f"KV moved {kv_bytes/1e9:.2f} GB")
+            print(f"  paging cost  : full_decode is {paging_overhead_pct:,.0f}% "
+                  f"slower than contiguous-only (gather alone = "
+                  f"{gather_overhead_pct:,.0f}% of contiguous attn)")
 
     print("\n" + "=" * 78)
     print("NOTE: full_decode = paged_gather + SDPA as separate PyTorch ops,")

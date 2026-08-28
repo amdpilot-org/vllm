@@ -13,28 +13,36 @@ self-check     : PASS  (gather K bit-exact=True, V bit-exact=True, attn match=Tr
 ------------------------------------------------------------------------------
 
 [batch=1] seq_len=4096 (1 decode token/iter)
-  paged gather : median 0.0421 ms  (mean 0.0424, min 0.0416, max 0.0550, std 0.0012, p5 0.0417, p95 0.0441, cv 2.80%)
-  attention    : median 0.1516 ms  (mean 0.1517, min 0.1502, max 0.1589, std 0.0011, p5 0.1504, p95 0.1535, cv 0.74%)
-  full decode  : median 0.1904 ms  (mean 0.1906, min 0.1890, max 0.2006, std 0.0013, p5 0.1893, p95 0.1923, cv 0.66%)
-  throughput   : 5,252 decode tokens/s | gather BW 398.3 GB/s | KV moved 0.02 GB
+  paged gather : median 0.0431 ms  (mean 0.0433, min 0.0427, max 0.0506, std 0.0008, p5 0.0428, p95 0.0440, cv 1.81%)
+  attention    : median 0.1519 ms  (mean 0.1519, min 0.1504, max 0.1562, std 0.0008, p5 0.1506, p95 0.1530, cv 0.56%)
+  full decode  : median 0.1908 ms  (mean 0.1910, min 0.1888, max 0.1966, std 0.0011, p5 0.1896, p95 0.1930, cv 0.59%)
+  contiguous   : median 0.1517 ms  (mean 0.1520, min 0.1509, max 0.1574, std 0.0010, p5 0.1511, p95 0.1538, cv 0.64%)
+  throughput   : 5,240 decode tokens/s | gather BW 389.4 GB/s | KV moved 0.02 GB
+  paging cost  : full_decode is 26% slower than contiguous-only (gather alone = 28% of contiguous attn)
 
 [batch=4] seq_len=4096 (4 decode tokens/iter)
-  paged gather : median 0.0971 ms  (mean 0.0977, min 0.0958, max 0.1093, std 0.0016, p5 0.0962, p95 0.1001, cv 1.59%)
-  attention    : median 0.1525 ms  (mean 0.1527, min 0.1513, max 0.1604, std 0.0009, p5 0.1517, p95 0.1538, cv 0.61%)
-  full decode  : median 0.2472 ms  (mean 0.2474, min 0.2450, max 0.2547, std 0.0011, p5 0.2459, p95 0.2491, cv 0.45%)
-  throughput   : 16,178 decode tokens/s | gather BW 691.0 GB/s | KV moved 0.07 GB
+  paged gather : median 0.0978 ms  (mean 0.0982, min 0.0964, max 0.1043, std 0.0013, p5 0.0968, p95 0.1007, cv 1.35%)
+  attention    : median 0.1523 ms  (mean 0.1524, min 0.1504, max 0.1579, std 0.0011, p5 0.1508, p95 0.1541, cv 0.75%)
+  full decode  : median 0.2482 ms  (mean 0.2484, min 0.2454, max 0.2545, std 0.0015, p5 0.2463, p95 0.2506, cv 0.61%)
+  contiguous   : median 0.1524 ms  (mean 0.1527, min 0.1513, max 0.1590, std 0.0011, p5 0.1516, p95 0.1545, cv 0.75%)
+  throughput   : 16,116 decode tokens/s | gather BW 686.3 GB/s | KV moved 0.07 GB
+  paging cost  : full_decode is 63% slower than contiguous-only (gather alone = 64% of contiguous attn)
 
 [batch=16] seq_len=4096 (16 decode tokens/iter)
-  paged gather : median 0.3232 ms  (mean 0.3235, min 0.3193, max 0.3300, std 0.0018, p5 0.3212, p95 0.3270, cv 0.56%)
-  attention    : median 0.3048 ms  (mean 0.3049, min 0.3028, max 0.3113, std 0.0013, p5 0.3032, p95 0.3070, cv 0.44%)
-  full decode  : median 0.6584 ms  (mean 0.6583, min 0.6535, max 0.6651, std 0.0025, p5 0.6544, p95 0.6629, cv 0.38%)
-  throughput   : 24,303 decode tokens/s | gather BW 830.5 GB/s | KV moved 0.27 GB
+  paged gather : median 0.3230 ms  (mean 0.3233, min 0.3194, max 0.3308, std 0.0021, p5 0.3204, p95 0.3271, cv 0.64%)
+  attention    : median 0.3053 ms  (mean 0.3055, min 0.3026, max 0.3116, std 0.0016, p5 0.3031, p95 0.3081, cv 0.53%)
+  full decode  : median 0.6582 ms  (mean 0.6582, min 0.6508, max 0.6682, std 0.0030, p5 0.6532, p95 0.6628, cv 0.45%)
+  contiguous   : median 0.3052 ms  (mean 0.3055, min 0.3022, max 0.3118, std 0.0017, p5 0.3035, p95 0.3093, cv 0.56%)
+  throughput   : 24,307 decode tokens/s | gather BW 831.0 GB/s | KV moved 0.27 GB
+  paging cost  : full_decode is 116% slower than contiguous-only (gather alone = 106% of contiguous attn)
 
 [batch=64] seq_len=4096 (64 decode tokens/iter)
-  paged gather : median 1.2911 ms  (mean 1.2917, min 1.2795, max 1.3074, std 0.0049, p5 1.2842, p95 1.3012, cv 0.38%)
-  attention    : median 1.3269 ms  (mean 1.3273, min 1.3160, max 1.3435, std 0.0047, p5 1.3200, p95 1.3345, cv 0.36%)
-  full decode  : median 2.6137 ms  (mean 2.6143, min 2.5942, max 2.6354, std 0.0082, p5 2.6004, p95 2.6273, cv 0.31%)
-  throughput   : 24,486 decode tokens/s | gather BW 831.7 GB/s | KV moved 1.07 GB
+  paged gather : median 1.2955 ms  (mean 1.2961, min 1.2821, max 1.3210, std 0.0053, p5 1.2887, p95 1.3037, cv 0.41%)
+  attention    : median 1.3252 ms  (mean 1.3252, min 1.3108, max 1.3361, std 0.0050, p5 1.3171, p95 1.3326, cv 0.38%)
+  full decode  : median 2.6173 ms  (mean 2.6174, min 2.6007, max 2.6342, std 0.0073, p5 2.6052, p95 2.6291, cv 0.28%)
+  contiguous   : median 1.3274 ms  (mean 1.3275, min 1.3156, max 1.3385, std 0.0049, p5 1.3189, p95 1.3355, cv 0.37%)
+  throughput   : 24,453 decode tokens/s | gather BW 828.8 GB/s | KV moved 1.07 GB
+  paging cost  : full_decode is 97% slower than contiguous-only (gather alone = 98% of contiguous attn)
 
 ==============================================================================
 NOTE: full_decode = paged_gather + SDPA as separate PyTorch ops,

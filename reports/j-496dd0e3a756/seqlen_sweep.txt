@@ -1,0 +1,62 @@
+==============================================================================
+Paged KV-cache decode attention (PagedAttention decode) benchmark
+==============================================================================
+GPU           : AMD Instinct MI355X
+torch         : 2.9.1+rocm7.2.0.git7e1940d4
+HIP           : 7.2.26015-fc0010cf6a
+gfx/capability: [9, 5]  arch_list=['gfx908', 'gfx90a', 'gfx942', 'gfx1030', 'gfx1100', 'gfx1101', 'gfx1200', 'gfx1201', 'gfx950', 'gfx1151', 'gfx1150']
+SDPA decode   : default=FLASH usable={'FLASH': True, 'EFFICIENT': False, 'MATH': True, 'CUDNN': False}
+------------------------------------------------------------------------------
+config: head_size=128 num_heads=32 num_kv_heads=8 (GQA 4q/kv) block_size=16 seq_len=[1024, 2048, 4096, 8192] dtype=bfloat16 scale=0.088388
+------------------------------------------------------------------------------
+self-check     : PASS  (gather K bit-exact=True, V bit-exact=True, attn match=True; k_maxdiff=0.00e+00, v_maxdiff=0.00e+00, attn_maxdiff=0.00e+00)
+------------------------------------------------------------------------------
+
+[batch=16] seq_len=1024 (16 decode tokens/iter)
+  paged gather : median 0.0966 ms  (mean 0.0971, min 0.0953, max 0.1105, std 0.0016, p5 0.0957, p95 0.0996, cv 1.68%)
+  attention    : median 0.0489 ms  (mean 0.0491, min 0.0484, max 0.0548, std 0.0009, p5 0.0486, p95 0.0509, cv 1.74%)
+  full decode  : median 0.1440 ms  (mean 0.1442, min 0.1430, max 0.1496, std 0.0010, p5 0.1433, p95 0.1464, cv 0.68%)
+  contiguous   : median 0.0489 ms  (mean 0.0491, min 0.0486, max 0.0542, std 0.0008, p5 0.0486, p95 0.0504, cv 1.54%)
+  throughput   : 111,140 decode tokens/s | gather BW 694.8 GB/s | KV moved 0.07 GB
+  paging cost  : full_decode is 195% slower than contiguous-only (gather alone = 198% of contiguous attn)
+  fp8 gather   : median 0.1475 ms  (mean 0.1477, cv 0.67%)  | 0.65x bf16 gather
+  fp8 full     : median 0.1948 ms  (mean 0.1949, cv 0.37%)  | 0.74x bf16 full_decode
+
+[batch=16] seq_len=2048 (16 decode tokens/iter)
+  paged gather : median 0.1769 ms  (mean 0.1771, min 0.1747, max 0.1839, std 0.0015, p5 0.1752, p95 0.1800, cv 0.85%)
+  attention    : median 0.1590 ms  (mean 0.1594, min 0.1577, max 0.1656, std 0.0012, p5 0.1581, p95 0.1613, cv 0.75%)
+  full decode  : median 0.3357 ms  (mean 0.3361, min 0.3325, max 0.3433, std 0.0017, p5 0.3339, p95 0.3391, cv 0.49%)
+  contiguous   : median 0.1591 ms  (mean 0.1594, min 0.1581, max 0.1670, std 0.0012, p5 0.1585, p95 0.1611, cv 0.72%)
+  throughput   : 47,655 decode tokens/s | gather BW 758.6 GB/s | KV moved 0.13 GB
+  paging cost  : full_decode is 111% slower than contiguous-only (gather alone = 111% of contiguous attn)
+  fp8 gather   : median 0.2658 ms  (mean 0.2661, cv 0.57%)  | 0.67x bf16 gather
+  fp8 full     : median 0.4234 ms  (mean 0.4236, cv 0.37%)  | 0.79x bf16 full_decode
+
+[batch=16] seq_len=4096 (16 decode tokens/iter)
+  paged gather : median 0.3219 ms  (mean 0.3222, min 0.3182, max 0.3302, std 0.0017, p5 0.3200, p95 0.3252, cv 0.52%)
+  attention    : median 0.3046 ms  (mean 0.3047, min 0.3019, max 0.3113, std 0.0013, p5 0.3027, p95 0.3068, cv 0.44%)
+  full decode  : median 0.6565 ms  (mean 0.6568, min 0.6511, max 0.6649, std 0.0028, p5 0.6525, p95 0.6618, cv 0.42%)
+  contiguous   : median 0.3048 ms  (mean 0.3049, min 0.3030, max 0.3097, std 0.0011, p5 0.3034, p95 0.3068, cv 0.38%)
+  throughput   : 24,371 decode tokens/s | gather BW 834.0 GB/s | KV moved 0.27 GB
+  paging cost  : full_decode is 115% slower than contiguous-only (gather alone = 106% of contiguous attn)
+  fp8 gather   : median 0.5745 ms  (mean 0.5744, cv 0.29%)  | 0.56x bf16 gather
+  fp8 full     : median 0.8991 ms  (mean 0.8995, cv 0.25%)  | 0.73x bf16 full_decode
+
+[batch=16] seq_len=8192 (16 decode tokens/iter)
+  paged gather : median 0.6425 ms  (mean 0.6430, min 0.6359, max 0.6515, std 0.0030, p5 0.6384, p95 0.6483, cv 0.47%)
+  attention    : median 0.6611 ms  (mean 0.6614, min 0.6545, max 0.6710, std 0.0033, p5 0.6562, p95 0.6677, cv 0.50%)
+  full decode  : median 1.2988 ms  (mean 1.2990, min 1.2899, max 1.3095, std 0.0043, p5 1.2927, p95 1.3060, cv 0.33%)
+  contiguous   : median 0.6613 ms  (mean 0.6615, min 0.6534, max 0.6725, std 0.0034, p5 0.6557, p95 0.6672, cv 0.52%)
+  throughput   : 12,319 decode tokens/s | gather BW 835.6 GB/s | KV moved 0.54 GB
+  paging cost  : full_decode is 96% slower than contiguous-only (gather alone = 97% of contiguous attn)
+  fp8 gather   : median 1.1257 ms  (mean 1.1258, cv 0.25%)  | 0.57x bf16 gather
+  fp8 full     : median 1.7896 ms  (mean 1.7895, cv 0.27%)  | 0.73x bf16 full_decode
+
+==============================================================================
+NOTE: full_decode = paged_gather + SDPA as separate PyTorch ops,
+which materialises a contiguous KV buffer. vLLM's fused HIP kernel
+(paged_attention_rocm) avoids that materialisation, so full_decode
+here is an UPPER BOUND on the real kernel, not its throughput.
+==============================================================================
+
+wrote /tmp/bench/results_seqlen_fp8.json

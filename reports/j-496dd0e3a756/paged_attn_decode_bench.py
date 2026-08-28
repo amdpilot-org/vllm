@@ -232,6 +232,96 @@ def attention_decode(
 
 
 # --------------------------------------------------------------------------- #
+# Correctness self-check: independent reference gather vs. the vectorized path. #
+# --------------------------------------------------------------------------- #
+def reference_gather_loop(
+    cache: PagedKVCache, batch: int, num_kv_heads: int,
+    head_size: int, block_size: int, num_blocks_per_seq: int,
+    seq_len: int, dtype: torch.dtype,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Reconstruct K/V via an *explicit Python loop* over blocks — a genuinely
+    different code path from `paged_gather`'s vectorized fancy-index + permute.
+
+    If this matches `paged_gather` bit-for-bit, the block-layout permutation
+    (the part of "faithful reimplementation" that is easy to get wrong) is
+    verified rather than merely asserted.
+    """
+    x = 16 // torch.tensor([], dtype=dtype).element_size()
+    bt = cache.block_table[:, :num_blocks_per_seq]  # [batch, nblocks]
+    k_list, v_list = [], []
+    for b in range(batch):
+        k_blocks, v_blocks = [], []
+        for j in range(num_blocks_per_seq):
+            blk = bt[b, j].item()
+            # key_cache[blk]: [Hkv, hs//x, bs, x] -> [Hkv, bs, hs//x, x] -> [Hkv, bs, hs]
+            kc = cache.key_cache[blk].permute(0, 2, 1, 3).reshape(
+                num_kv_heads, block_size, head_size
+            )
+            # value_cache[blk]: [Hkv, hs, bs] -> [Hkv, bs, hs]
+            vc = cache.value_cache[blk].permute(0, 2, 1).reshape(
+                num_kv_heads, block_size, head_size
+            )
+            k_blocks.append(kc)
+            v_blocks.append(vc)
+        k_list.append(torch.cat(k_blocks, dim=1))  # [Hkv, nblocks*bs, hs]
+        v_list.append(torch.cat(v_blocks, dim=1))
+    k = torch.stack(k_list, dim=0)  # [batch, Hkv, nblocks*bs, hs]
+    v = torch.stack(v_list, dim=0)
+    k = k[:, :, :seq_len, :].contiguous()
+    v = v[:, :, :seq_len, :].contiguous()
+    return k, v
+
+
+def run_self_check(
+    num_kv_heads: int, head_size: int, block_size: int, dtype: torch.dtype,
+    device: torch.device,
+) -> dict:
+    """Verify paged_gather matches an independent loop-based reference, and
+    that attention over gathered K/V matches attention over the reference K/V.
+    """
+    batch, seq_len = 3, 128
+    num_blocks_per_seq = (seq_len + block_size - 1) // block_size
+    max_blocks = num_blocks_per_seq
+    num_blocks = batch * max_blocks + 8
+    cache = build_paged_cache(
+        num_blocks, num_kv_heads, head_size, block_size,
+        batch, max_blocks, dtype, device,
+    )
+    # vectorized gather (the path the benchmark times)
+    k_vec, v_vec = paged_gather(
+        cache, batch, num_kv_heads, head_size, block_size,
+        num_blocks_per_seq, seq_len, dtype, device,
+    )
+    # independent loop-based reference gather
+    k_ref, v_ref = reference_gather_loop(
+        cache, batch, num_kv_heads, head_size, block_size,
+        num_blocks_per_seq, seq_len, dtype,
+    )
+    k_match = torch.allclose(k_vec, k_ref, atol=0, rtol=0)
+    v_match = torch.allclose(v_vec, v_ref, atol=0, rtol=0)
+    k_maxdiff = (k_vec - k_ref).abs().max().item()
+    v_maxdiff = (v_vec - v_ref).abs().max().item()
+    # attention check: same query, gathered vs. reference K/V
+    num_heads = num_kv_heads * 4  # GQA 4q/kv
+    scale = 1.0 / (head_size ** 0.5)
+    query = torch.randn(batch, num_heads, 1, head_size, dtype=dtype,
+                        device=device) * 0.1
+    out_vec = attention_decode(query, k_vec, v_vec, scale)
+    out_ref = attention_decode(query, k_ref, v_ref, scale)
+    attn_match = torch.allclose(out_vec, out_ref, atol=1e-4, rtol=1e-4)
+    attn_maxdiff = (out_vec - out_ref).abs().max().item()
+    return {
+        "gather_k_bit_exact": bool(k_match),
+        "gather_v_bit_exact": bool(v_match),
+        "gather_k_maxdiff": k_maxdiff,
+        "gather_v_maxdiff": v_maxdiff,
+        "attention_match": bool(attn_match),
+        "attention_maxdiff": attn_maxdiff,
+        "pass": bool(k_match and v_match and attn_match),
+    }
+
+
+# --------------------------------------------------------------------------- #
 # Timing harness.                                                              #
 # --------------------------------------------------------------------------- #
 def time_op(fn, warmup: int, iters: int) -> list[float]:
@@ -308,7 +398,24 @@ def main() -> int:
           f"seq_len={args.seq_len} dtype={args.dtype} scale={scale:.6f}")
     print("-" * 78)
 
-    results = {"env": env, "config": vars(args), "runs": []}
+    # --- Correctness self-check (independent reference gather) ---------------
+    sc = run_self_check(args.num_kv_heads, args.head_size, args.block_size,
+                        dtype, device)
+    sc_status = "PASS" if sc["pass"] else "FAIL"
+    print(f"self-check     : {sc_status}  "
+          f"(gather K bit-exact={sc['gather_k_bit_exact']}, "
+          f"V bit-exact={sc['gather_v_bit_exact']}, "
+          f"attn match={sc['attention_match']}; "
+          f"k_maxdiff={sc['gather_k_maxdiff']:.2e}, "
+          f"v_maxdiff={sc['gather_v_maxdiff']:.2e}, "
+          f"attn_maxdiff={sc['attention_maxdiff']:.2e})")
+    if not sc["pass"]:
+        print("ERROR: self-check failed — paged gather does not match "
+              "independent reference; aborting.", file=sys.stderr)
+        return 1
+    print("-" * 78)
+
+    results = {"env": env, "config": vars(args), "self_check": sc, "runs": []}
 
     for seq_len in args.seq_len:
         num_blocks_per_seq = (seq_len + args.block_size - 1) // args.block_size

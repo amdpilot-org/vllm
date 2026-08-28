@@ -9,30 +9,32 @@ SDPA decode   : default=FLASH usable={'FLASH': True, 'EFFICIENT': False, 'MATH':
 ------------------------------------------------------------------------------
 config: head_size=128 num_heads=32 num_kv_heads=8 (GQA 4q/kv) block_size=16 seq_len=[4096] dtype=bfloat16 scale=0.088388
 ------------------------------------------------------------------------------
+self-check     : PASS  (gather K bit-exact=True, V bit-exact=True, attn match=True; k_maxdiff=0.00e+00, v_maxdiff=0.00e+00, attn_maxdiff=0.00e+00)
+------------------------------------------------------------------------------
 
 [batch=1] seq_len=4096 (1 decode token/iter)
-  paged gather : median 0.0427 ms  (mean 0.0429, min 0.0422, max 0.0502, std 0.0008, p5 0.0424, p95 0.0440, cv 1.94%)
-  attention    : median 0.1518 ms  (mean 0.1520, min 0.1501, max 0.1586, std 0.0011, p5 0.1506, p95 0.1535, cv 0.74%)
-  full decode  : median 0.1909 ms  (mean 0.1911, min 0.1894, max 0.1976, std 0.0013, p5 0.1898, p95 0.1938, cv 0.66%)
-  throughput   : 5,239 decode tokens/s | gather BW 392.7 GB/s | KV moved 0.02 GB
+  paged gather : median 0.0421 ms  (mean 0.0424, min 0.0416, max 0.0550, std 0.0012, p5 0.0417, p95 0.0441, cv 2.80%)
+  attention    : median 0.1516 ms  (mean 0.1517, min 0.1502, max 0.1589, std 0.0011, p5 0.1504, p95 0.1535, cv 0.74%)
+  full decode  : median 0.1904 ms  (mean 0.1906, min 0.1890, max 0.2006, std 0.0013, p5 0.1893, p95 0.1923, cv 0.66%)
+  throughput   : 5,252 decode tokens/s | gather BW 398.3 GB/s | KV moved 0.02 GB
 
 [batch=4] seq_len=4096 (4 decode tokens/iter)
-  paged gather : median 0.0979 ms  (mean 0.0983, min 0.0967, max 0.1081, std 0.0013, p5 0.0971, p95 0.1005, cv 1.36%)
-  attention    : median 0.1521 ms  (mean 0.1524, min 0.1510, max 0.1593, std 0.0011, p5 0.1513, p95 0.1540, cv 0.75%)
-  full decode  : median 0.2488 ms  (mean 0.2489, min 0.2463, max 0.2546, std 0.0014, p5 0.2470, p95 0.2518, cv 0.55%)
-  throughput   : 16,077 decode tokens/s | gather BW 685.3 GB/s | KV moved 0.07 GB
+  paged gather : median 0.0971 ms  (mean 0.0977, min 0.0958, max 0.1093, std 0.0016, p5 0.0962, p95 0.1001, cv 1.59%)
+  attention    : median 0.1525 ms  (mean 0.1527, min 0.1513, max 0.1604, std 0.0009, p5 0.1517, p95 0.1538, cv 0.61%)
+  full decode  : median 0.2472 ms  (mean 0.2474, min 0.2450, max 0.2547, std 0.0011, p5 0.2459, p95 0.2491, cv 0.45%)
+  throughput   : 16,178 decode tokens/s | gather BW 691.0 GB/s | KV moved 0.07 GB
 
 [batch=16] seq_len=4096 (16 decode tokens/iter)
-  paged gather : median 0.3231 ms  (mean 0.3234, min 0.3207, max 0.3297, std 0.0015, p5 0.3214, p95 0.3262, cv 0.48%)
-  attention    : median 0.3053 ms  (mean 0.3056, min 0.3018, max 0.3158, std 0.0019, p5 0.3030, p95 0.3094, cv 0.62%)
-  full decode  : median 0.6587 ms  (mean 0.6588, min 0.6523, max 0.6668, std 0.0028, p5 0.6548, p95 0.6632, cv 0.42%)
-  throughput   : 24,291 decode tokens/s | gather BW 830.7 GB/s | KV moved 0.27 GB
+  paged gather : median 0.3232 ms  (mean 0.3235, min 0.3193, max 0.3300, std 0.0018, p5 0.3212, p95 0.3270, cv 0.56%)
+  attention    : median 0.3048 ms  (mean 0.3049, min 0.3028, max 0.3113, std 0.0013, p5 0.3032, p95 0.3070, cv 0.44%)
+  full decode  : median 0.6584 ms  (mean 0.6583, min 0.6535, max 0.6651, std 0.0025, p5 0.6544, p95 0.6629, cv 0.38%)
+  throughput   : 24,303 decode tokens/s | gather BW 830.5 GB/s | KV moved 0.27 GB
 
 [batch=64] seq_len=4096 (64 decode tokens/iter)
-  paged gather : median 1.2920 ms  (mean 1.2922, min 1.2790, max 1.3083, std 0.0051, p5 1.2843, p95 1.3013, cv 0.40%)
-  attention    : median 1.3242 ms  (mean 1.3245, min 1.3116, max 1.3387, std 0.0053, p5 1.3165, p95 1.3337, cv 0.40%)
-  full decode  : median 2.6135 ms  (mean 2.6140, min 2.5928, max 2.6328, std 0.0080, p5 2.6006, p95 2.6273, cv 0.31%)
-  throughput   : 24,488 decode tokens/s | gather BW 831.1 GB/s | KV moved 1.07 GB
+  paged gather : median 1.2911 ms  (mean 1.2917, min 1.2795, max 1.3074, std 0.0049, p5 1.2842, p95 1.3012, cv 0.38%)
+  attention    : median 1.3269 ms  (mean 1.3273, min 1.3160, max 1.3435, std 0.0047, p5 1.3200, p95 1.3345, cv 0.36%)
+  full decode  : median 2.6137 ms  (mean 2.6143, min 2.5942, max 2.6354, std 0.0082, p5 2.6004, p95 2.6273, cv 0.31%)
+  throughput   : 24,486 decode tokens/s | gather BW 831.7 GB/s | KV moved 1.07 GB
 
 ==============================================================================
 NOTE: full_decode = paged_gather + SDPA as separate PyTorch ops,

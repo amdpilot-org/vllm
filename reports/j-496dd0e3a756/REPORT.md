@@ -6,13 +6,17 @@ Measured **vLLM's signature operation — paged KV-cache decode attention
 ("PagedAttention decode")** — on an AMD Instinct MI355X (gfx950) with
 PyTorch 2.9.1+rocm7.2.0 / ROCm 7.2.0. vLLM's fused HIP kernel
 (`paged_attention_rocm`) cannot be imported without a build, so the operation
-is reimplemented **faithfully in pure PyTorch** using vLLM's exact paged KV-cache
-"flash" block layout, and timed with 200 CUDA-event samples after a 30-iter
-warmup. All results are stable (coefficient of variation **≤ 2.0%**, mostly
-**< 1%**). At `seq_len=4096`, decode throughput saturates around
+is reimplemented **faithfully in pure PyTorch** using vLLM's exact paged
+KV-cache "flash" block layout, and timed with 200 CUDA-event samples after a
+30-iter warmup. All results are stable (coefficient of variation **≤ 2.8%**,
+mostly **< 1%**). At `seq_len=4096`, decode throughput saturates around
 **~24.5k decode tokens/s** (batch ≥ 16); the paged-gather data movement
 saturates around **~830 GB/s**. The reported `full_decode` time is an **upper
 bound** on vLLM's fused kernel (see Gaps).
+
+A **correctness self-check** verifies the paged gather against an independent
+loop-based reference gather: K/V match **bit-exact** (maxdiff = 0), and
+attention over gathered K/V matches attention over the reference (maxdiff = 0).
 
 ## The operation, and why it represents this project
 
@@ -62,6 +66,21 @@ reimplemented faithfully in `paged_attn_decode_bench.py`:
   ≈ 1.69 ms on a 4×32×8×2048×128 probe); EFFICIENT and CUDNN backends are
   unavailable for this shape.
 
+### Correctness self-check (verified, not just asserted)
+
+Before any timing, the script runs a self-check that reconstructs K/V via an
+**independent Python loop** over blocks (a genuinely different code path from
+the vectorized fancy-index + permute used in `paged_gather`) and compares:
+
+| check | result |
+|-------|--------|
+| gather K bit-exact vs. loop reference | **True** (maxdiff = 0.00e+00) |
+| gather V bit-exact vs. loop reference | **True** (maxdiff = 0.00e+00) |
+| attention over gathered K/V == attention over reference K/V | **True** (maxdiff = 0.00e+00) |
+
+This verifies the block-layout permutation — the part of "faithful
+reimplementation" that is easy to get wrong — rather than merely asserting it.
+
 The script times three things per config, each with 30 warmup + 200 timed
 CUDA-event iterations:
 
@@ -98,35 +117,35 @@ All times in **ms**. Spread reported as `median | mean | min | max | std | p5 | 
 
 | batch | gather (med) | attention (med) | full_decode (med) | full cv% | tok/s | gather BW |
 |------:|-------------:|----------------:|------------------:|---------:|------:|----------:|
-| 1  | 0.0427 | 0.1518 | 0.1909 | 0.66 | 5,239 | 393 GB/s |
-| 4  | 0.0979 | 0.1521 | 0.2488 | 0.55 | 16,077 | 685 GB/s |
-| 16 | 0.3231 | 0.3053 | 0.6587 | 0.42 | 24,291 | 831 GB/s |
-| 64 | 1.2920 | 1.3242 | 2.6135 | 0.31 | 24,488 | 831 GB/s |
+| 1  | 0.0421 | 0.1516 | 0.1904 | 0.66 | 5,252 | 398 GB/s |
+| 4  | 0.0971 | 0.1525 | 0.2472 | 0.45 | 16,178 | 691 GB/s |
+| 16 | 0.3232 | 0.3048 | 0.6584 | 0.38 | 24,303 | 830 GB/s |
+| 64 | 1.2911 | 1.3269 | 2.6137 | 0.31 | 24,486 | 832 GB/s |
 
 Full spread (`median|mean|min|max|std|p5|p95|cv%`) for `full_decode`:
 
-- batch 1 : `0.1909 | 0.1911 | 0.1894 | 0.1976 | 0.0013 | 0.1898 | 0.1938 | 0.66`
-- batch 4 : `0.2488 | 0.2489 | 0.2463 | 0.2546 | 0.0014 | 0.2470 | 0.2518 | 0.55`
-- batch 16: `0.6587 | 0.6588 | 0.6523 | 0.6668 | 0.0028 | 0.6548 | 0.6632 | 0.42`
-- batch 64: `2.6135 | 2.6140 | 2.5928 | 2.6328 | 0.0080 | 2.6006 | 2.6273 | 0.31`
+- batch 1 : `0.1904 | 0.1906 | 0.1890 | 0.2006 | 0.0013 | 0.1893 | 0.1923 | 0.66`
+- batch 4 : `0.2472 | 0.2474 | 0.2450 | 0.2547 | 0.0011 | 0.2459 | 0.2491 | 0.45`
+- batch 16: `0.6584 | 0.6583 | 0.6535 | 0.6651 | 0.0025 | 0.6544 | 0.6629 | 0.38`
+- batch 64: `2.6137 | 2.6143 | 2.5942 | 2.6354 | 0.0082 | 2.6004 | 2.6273 | 0.31`
 
 ### Sequence-length sweep — `batch = 16`
 
 | seq_len | gather (med) | attention (med) | full_decode (med) | full cv% | tok/s | gather BW |
 |--------:|-------------:|----------------:|------------------:|---------:|------:|----------:|
-| 1024 | 0.0978 | 0.0491 | 0.1439 | 0.72 | 111,187 | 686 GB/s |
-| 2048 | 0.1766 | 0.1595 | 0.3356 | 0.65 | 47,675 | 760 GB/s |
-| 4096 | 0.3212 | 0.3056 | 0.6549 | 0.55 | 24,432 | 836 GB/s |
-| 8192 | 0.6446 | 0.6595 | 1.3035 | 0.41 | 12,274 | 833 GB/s |
+| 1024 | 0.0971 | 0.0490 | 0.1432 | 0.74 | 111,731 | 691 GB/s |
+| 2048 | 0.1767 | 0.1591 | 0.3356 | 0.56 | 47,670 | 760 GB/s |
+| 4096 | 0.3229 | 0.3053 | 0.6581 | 0.45 | 24,314 | 831 GB/s |
+| 8192 | 0.6442 | 0.6604 | 1.3020 | 0.39 | 12,289 | 833 GB/s |
 
-`full_decode` time scales near-linearly with KV length (1024→8192 ≈ 9× the KV,
+`full_decode` time scales near-linearly with KV length (1024→8192 ≈ 8× the KV,
 9.1× the time), confirming the measurement is in a bandwidth/compute-bound
 regime rather than launch-overhead-dominated (at batch 16).
 
 ### Interpretation
 
 - **Throughput saturates at ~24.5k decode tokens/s** (batch ≥ 16, seq 4096): at
-  small batch the op is launch/latency bound (5.2k tok/s at batch 1); the GPU
+  small batch the op is launch/latency bound (5.3k tok/s at batch 1); the GPU
   only fills up around batch 16.
 - **The paged gather is ~half the decode cost** at batch 16+ (gather ≈ attention),
   and its bandwidth plateaus at **~830 GB/s** — the signature cost of the
@@ -179,9 +198,11 @@ python reports/j-496dd0e3a756/paged_attn_decode_bench.py \
     --json reports/j-496dd0e3a756/results_seqlen_sweep.json
 ```
 
-The script is self-contained (only `torch` + stdlib). Raw machine-readable
-results are in `results_batch_sweep.json` / `results_seqlen_sweep.json`; the
-captured console output is in `batch_sweep.txt` / `seqlen_sweep.txt`.
+The script is self-contained (only `torch` + stdlib). A correctness self-check
+runs automatically at startup and aborts (exit 1) if the paged gather does not
+match the independent reference. Raw machine-readable results are in
+`results_batch_sweep.json` / `results_seqlen_sweep.json`; the captured console
+output is in `batch_sweep.txt` / `seqlen_sweep.txt`.
 
 Options of note: `--dtype float16`, `--num-heads/--num-kv-heads/--head-size`
 (model geometry), `--block-size` (vLLM default 16), `--warmup/--iters` (timing).

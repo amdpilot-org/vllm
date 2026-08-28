@@ -1,0 +1,44 @@
+==============================================================================
+Paged KV-cache decode attention (PagedAttention decode) benchmark
+==============================================================================
+GPU           : AMD Instinct MI355X
+torch         : 2.9.1+rocm7.2.0.git7e1940d4
+HIP           : 7.2.26015-fc0010cf6a
+gfx/capability: [9, 5]  arch_list=['gfx908', 'gfx90a', 'gfx942', 'gfx1030', 'gfx1100', 'gfx1101', 'gfx1200', 'gfx1201', 'gfx950', 'gfx1151', 'gfx1150']
+SDPA decode   : default=FLASH usable={'FLASH': True, 'EFFICIENT': False, 'MATH': True, 'CUDNN': False}
+------------------------------------------------------------------------------
+config: head_size=128 num_heads=32 num_kv_heads=8 (GQA 4q/kv) block_size=16 seq_len=[4096] dtype=bfloat16 scale=0.088388
+------------------------------------------------------------------------------
+
+[batch=1] seq_len=4096 (1 decode token/iter)
+  paged gather : median 0.0427 ms  (mean 0.0429, min 0.0422, max 0.0502, std 0.0008, p5 0.0424, p95 0.0440, cv 1.94%)
+  attention    : median 0.1518 ms  (mean 0.1520, min 0.1501, max 0.1586, std 0.0011, p5 0.1506, p95 0.1535, cv 0.74%)
+  full decode  : median 0.1909 ms  (mean 0.1911, min 0.1894, max 0.1976, std 0.0013, p5 0.1898, p95 0.1938, cv 0.66%)
+  throughput   : 5,239 decode tokens/s | gather BW 392.7 GB/s | KV moved 0.02 GB
+
+[batch=4] seq_len=4096 (4 decode tokens/iter)
+  paged gather : median 0.0979 ms  (mean 0.0983, min 0.0967, max 0.1081, std 0.0013, p5 0.0971, p95 0.1005, cv 1.36%)
+  attention    : median 0.1521 ms  (mean 0.1524, min 0.1510, max 0.1593, std 0.0011, p5 0.1513, p95 0.1540, cv 0.75%)
+  full decode  : median 0.2488 ms  (mean 0.2489, min 0.2463, max 0.2546, std 0.0014, p5 0.2470, p95 0.2518, cv 0.55%)
+  throughput   : 16,077 decode tokens/s | gather BW 685.3 GB/s | KV moved 0.07 GB
+
+[batch=16] seq_len=4096 (16 decode tokens/iter)
+  paged gather : median 0.3231 ms  (mean 0.3234, min 0.3207, max 0.3297, std 0.0015, p5 0.3214, p95 0.3262, cv 0.48%)
+  attention    : median 0.3053 ms  (mean 0.3056, min 0.3018, max 0.3158, std 0.0019, p5 0.3030, p95 0.3094, cv 0.62%)
+  full decode  : median 0.6587 ms  (mean 0.6588, min 0.6523, max 0.6668, std 0.0028, p5 0.6548, p95 0.6632, cv 0.42%)
+  throughput   : 24,291 decode tokens/s | gather BW 830.7 GB/s | KV moved 0.27 GB
+
+[batch=64] seq_len=4096 (64 decode tokens/iter)
+  paged gather : median 1.2920 ms  (mean 1.2922, min 1.2790, max 1.3083, std 0.0051, p5 1.2843, p95 1.3013, cv 0.40%)
+  attention    : median 1.3242 ms  (mean 1.3245, min 1.3116, max 1.3387, std 0.0053, p5 1.3165, p95 1.3337, cv 0.40%)
+  full decode  : median 2.6135 ms  (mean 2.6140, min 2.5928, max 2.6328, std 0.0080, p5 2.6006, p95 2.6273, cv 0.31%)
+  throughput   : 24,488 decode tokens/s | gather BW 831.1 GB/s | KV moved 1.07 GB
+
+==============================================================================
+NOTE: full_decode = paged_gather + SDPA as separate PyTorch ops,
+which materialises a contiguous KV buffer. vLLM's fused HIP kernel
+(paged_attention_rocm) avoids that materialisation, so full_decode
+here is an UPPER BOUND on the real kernel, not its throughput.
+==============================================================================
+
+wrote /tmp/bench/results.json

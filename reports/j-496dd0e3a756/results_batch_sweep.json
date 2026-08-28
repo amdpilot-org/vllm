@@ -1,0 +1,222 @@
+{
+  "env": {
+    "torch_version": "2.9.1+rocm7.2.0.git7e1940d4",
+    "hip_version": "7.2.26015-fc0010cf6a",
+    "cuda_available": true,
+    "device_count": 1,
+    "device_name": "AMD Instinct MI355X",
+    "device_capability": [
+      9,
+      5
+    ],
+    "arch_list": [
+      "gfx908",
+      "gfx90a",
+      "gfx942",
+      "gfx1030",
+      "gfx1100",
+      "gfx1101",
+      "gfx1200",
+      "gfx1201",
+      "gfx950",
+      "gfx1151",
+      "gfx1150"
+    ],
+    "rocm_smi_product": "\n\n============================ ROCm System Management Interface ============================\n====================================== Product Info ======================================\nGPU[0]\t\t: Card Series: \t\tAMD Instinct MI355X\nGPU[0]\t\t: Card Model: \t\t0x75a3\nGPU[0]\t\t: Card Vendor: \t\tAdvanced Micro Devices, Inc. [AMD/ATI]\nGPU[0]\t\t: Card SKU: \t\tN/A\nGPU[0]\t\t: Subsystem ID: \t0x75a3\nGPU[0]\t\t: Device Rev: \t\t0x00\nGPU[0]\t\t: Node ID: \t\t2\nGPU[0]\t\t: GUID: \t\t42583\nGPU[0]\t\t: GFX Version: \t\tgfx950\n==========================================================================================\n================================== End of ROCm SMI Log ===================================\n",
+    "hipcc_version": "HIP version: 7.2.26015-fc0010cf6a\nAMD clang version 22.0.0git (https://github.com/RadeonOpenCompute/llvm-project roc-7.2.0 26014 7b800a19466229b8479a78de19143dc33c3ab9b5)\nTarget: x86_64-unknown-linux-gnu\nThread model: posix\nInstalledDir: /opt/rocm-7.2.0/lib/llvm/bin\nConfiguration file: /opt/rocm-7.2.0/lib/llvm/bin/clang++.cfg\n",
+    "sdpa_decode_backends_usable": {
+      "FLASH": true,
+      "EFFICIENT": false,
+      "MATH": true,
+      "CUDNN": false
+    },
+    "sdpa_default_decode_backend": "FLASH",
+    "sdpa_default_decode_ms": 0.08150099962949753,
+    "sdpa_flash_decode_ms": 0.08024100214242935
+  },
+  "config": {
+    "head_size": 128,
+    "num_heads": 32,
+    "num_kv_heads": 8,
+    "block_size": 16,
+    "seq_len": [
+      4096
+    ],
+    "batch": [
+      1,
+      4,
+      16,
+      64
+    ],
+    "dtype": "bfloat16",
+    "warmup": 30,
+    "iters": 200,
+    "json": "/tmp/bench/results.json"
+  },
+  "runs": [
+    {
+      "batch": 1,
+      "seq_len": 4096,
+      "num_blocks_per_seq": 256,
+      "gather": {
+        "n": 200,
+        "mean_ms": 0.04293623000383377,
+        "median_ms": 0.0427200011909008,
+        "min_ms": 0.04224000126123428,
+        "max_ms": 0.05020099878311157,
+        "std_ms": 0.0008318179250508234,
+        "p5_ms": 0.04236000031232834,
+        "p95_ms": 0.04404100030660629,
+        "cv_pct": 1.9373334011312835
+      },
+      "attention_sdpa": {
+        "n": 200,
+        "mean_ms": 0.15196172036230565,
+        "median_ms": 0.1518010050058365,
+        "min_ms": 0.1501220017671585,
+        "max_ms": 0.15860100090503693,
+        "std_ms": 0.001125794052074446,
+        "p5_ms": 0.15060099959373474,
+        "p95_ms": 0.15348100662231445,
+        "cv_pct": 0.7408405547070267
+      },
+      "full_decode": {
+        "n": 200,
+        "mean_ms": 0.19114410541951657,
+        "median_ms": 0.19088199734687805,
+        "min_ms": 0.1894419938325882,
+        "max_ms": 0.19756199419498444,
+        "std_ms": 0.0012644665495566637,
+        "p5_ms": 0.18984200060367584,
+        "p95_ms": 0.19384199380874634,
+        "cv_pct": 0.661525264816017
+      },
+      "tokens_per_s_median": 5238.838727063201,
+      "kv_bytes_gathered": 16777216,
+      "gather_bandwidth_gbs_median": 392.7250826850043
+    },
+    {
+      "batch": 4,
+      "seq_len": 4096,
+      "num_blocks_per_seq": 256,
+      "gather": {
+        "n": 200,
+        "mean_ms": 0.09831920001655817,
+        "median_ms": 0.09792099893093109,
+        "min_ms": 0.09672100096940994,
+        "max_ms": 0.10808099806308746,
+        "std_ms": 0.0013395399800965391,
+        "p5_ms": 0.09712100028991699,
+        "p95_ms": 0.10048100352287292,
+        "cv_pct": 1.3624398691923287
+      },
+      "attention_sdpa": {
+        "n": 200,
+        "mean_ms": 0.15244195967912674,
+        "median_ms": 0.15210100263357162,
+        "min_ms": 0.1510010063648224,
+        "max_ms": 0.15928199887275696,
+        "std_ms": 0.0011481673366318286,
+        "p5_ms": 0.15132200717926025,
+        "p95_ms": 0.15404100716114044,
+        "cv_pct": 0.7531832699137379
+      },
+      "full_decode": {
+        "n": 200,
+        "mean_ms": 0.2489085302501917,
+        "median_ms": 0.24880200624465942,
+        "min_ms": 0.24632200598716736,
+        "max_ms": 0.25460299849510193,
+        "std_ms": 0.0013619173265471919,
+        "p5_ms": 0.24704299867153168,
+        "p95_ms": 0.2518419921398163,
+        "cv_pct": 0.5471557464014004
+      },
+      "tokens_per_s_median": 16077.040777824759,
+      "kv_bytes_gathered": 67108864,
+      "gather_bandwidth_gbs_median": 685.3367993859566
+    },
+    {
+      "batch": 16,
+      "seq_len": 4096,
+      "num_blocks_per_seq": 256,
+      "gather": {
+        "n": 200,
+        "mean_ms": 0.3234106947481632,
+        "median_ms": 0.32314300537109375,
+        "min_ms": 0.3207229971885681,
+        "max_ms": 0.32968300580978394,
+        "std_ms": 0.0015390759515122295,
+        "p5_ms": 0.32136300206184387,
+        "p95_ms": 0.32616400718688965,
+        "cv_pct": 0.4758890093942914
+      },
+      "attention_sdpa": {
+        "n": 200,
+        "mean_ms": 0.30559651464223864,
+        "median_ms": 0.3052830100059509,
+        "min_ms": 0.30180299282073975,
+        "max_ms": 0.315762996673584,
+        "std_ms": 0.0018826419208733864,
+        "p5_ms": 0.302962988615036,
+        "p95_ms": 0.30944299697875977,
+        "cv_pct": 0.6160547750609632
+      },
+      "full_decode": {
+        "n": 200,
+        "mean_ms": 0.6587927341461182,
+        "median_ms": 0.6586869955062866,
+        "min_ms": 0.6523270010948181,
+        "max_ms": 0.6668469905853271,
+        "std_ms": 0.002771911620112237,
+        "p5_ms": 0.6547660231590271,
+        "p95_ms": 0.6632469892501831,
+        "cv_pct": 0.4207562525268282
+      },
+      "tokens_per_s_median": 24290.748275213664,
+      "kv_bytes_gathered": 268435456,
+      "gather_bandwidth_gbs_median": 830.7017374296306
+    },
+    {
+      "batch": 64,
+      "seq_len": 4096,
+      "num_blocks_per_seq": 256,
+      "gather": {
+        "n": 200,
+        "mean_ms": 1.2921980792284011,
+        "median_ms": 1.2919729948043823,
+        "min_ms": 1.2790130376815796,
+        "max_ms": 1.3082530498504639,
+        "std_ms": 0.005113584546641592,
+        "p5_ms": 1.2843329906463623,
+        "p95_ms": 1.3012930154800415,
+        "cv_pct": 0.3957276077747323
+      },
+      "attention_sdpa": {
+        "n": 200,
+        "mean_ms": 1.324458738565445,
+        "median_ms": 1.3241530060768127,
+        "min_ms": 1.3116140365600586,
+        "max_ms": 1.3387340307235718,
+        "std_ms": 0.0052833393792844725,
+        "p5_ms": 1.316452980041504,
+        "p95_ms": 1.3337329626083374,
+        "cv_pct": 0.3989055472582704
+      },
+      "full_decode": {
+        "n": 200,
+        "mean_ms": 2.614043986797333,
+        "median_ms": 2.6135469675064087,
+        "min_ms": 2.592787027359009,
+        "max_ms": 2.632786989212036,
+        "std_ms": 0.007983082147243893,
+        "p5_ms": 2.6006269454956055,
+        "p95_ms": 2.627346992492676,
+        "cv_pct": 0.3053920357715397
+      },
+      "tokens_per_s_median": 24487.79409580022,
+      "kv_bytes_gathered": 1073741824,
+      "gather_bandwidth_gbs_median": 831.0868944769045
+    }
+  ]
+}

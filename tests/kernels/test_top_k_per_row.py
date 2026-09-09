@@ -523,14 +523,14 @@ def test_top_k_per_row_decode_gfx950_topk2048_device_length_replay() -> None:
         row_ends = (
             seq_lens[:, None] - query_tokens + row_offsets + 1
         ).reshape(-1)
-    validate_topk_against_reference(
-        logits,
-        indices,
-        row_starts,
-        row_ends,
-        top_k,
-        "gfx950 top-k 2048 device-length replay",
-    )
+        validate_topk_against_reference(
+            logits,
+            indices,
+            row_starts,
+            row_ends,
+            top_k,
+            "gfx950 top-k 2048 device-length replay",
+        )
 
 
 @pytest.mark.skipif(not current_platform.is_rocm(), reason="This test requires ROCm")

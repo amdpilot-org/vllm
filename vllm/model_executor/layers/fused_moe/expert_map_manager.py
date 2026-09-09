@@ -258,6 +258,7 @@ class ExpertMapManager:
     def _init_aiter_shared_experts_topK_buffer(self):
         if self.num_fused_shared_experts > 0:
             dp_size = self.moe_parallel_config.dp_size
+            pcp_size = self.moe_parallel_config.pcp_size
             init_aiter_topK_meta_data(
                 n_routed_experts=self.global_num_experts,
                 n_shared_experts=self.num_fused_shared_experts,
@@ -265,7 +266,7 @@ class ExpertMapManager:
                 tp_rank=self.ep_rank if self.use_ep else self.tp_rank,
                 tp_size=self.ep_size if self.use_ep else self.tp_size,
                 shared_experts_score=1.0,
-                max_num_tokens=self.max_num_batched_tokens * dp_size,
+                max_num_tokens=self.max_num_batched_tokens * dp_size * pcp_size,
                 is_EP=self.use_ep,
             )
 

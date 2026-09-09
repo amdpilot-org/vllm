@@ -588,6 +588,43 @@ def test_top_k_per_row_decode_gfx950_topk2048_512_thread_replay() -> None:
 
 @pytest.mark.skipif(not current_platform.is_rocm(), reason="This test requires ROCm")
 @torch.inference_mode()
+def test_top_k_per_row_decode_gfx950_topk2048_row_boundary() -> None:
+    properties = torch.cuda.get_device_properties(0)
+    if not properties.gcnArchName.startswith("gfx950"):
+        pytest.skip("This test exercises the gfx950 launch configuration")
+
+    num_rows = 129
+    stride = 600_000
+    top_k = 2048
+    seq_lens = torch.full((num_rows,), stride, dtype=torch.int32, device="cuda")
+    logits = torch.randn(num_rows, stride, dtype=torch.float32, device="cuda")
+    indices = torch.empty((num_rows, top_k), dtype=torch.int32, device="cuda")
+
+    torch.ops._C.top_k_per_row_decode(
+        logits,
+        1,
+        seq_lens,
+        indices,
+        num_rows,
+        logits.stride(0),
+        logits.stride(1),
+        top_k,
+    )
+
+    row_starts = torch.zeros(num_rows, dtype=torch.int32, device="cuda")
+    row_ends = seq_lens.clone()
+    validate_topk_against_reference(
+        logits,
+        indices,
+        row_starts,
+        row_ends,
+        top_k,
+        "gfx950 top-k 2048 row boundary",
+    )
+
+
+@pytest.mark.skipif(not current_platform.is_rocm(), reason="This test requires ROCm")
+@torch.inference_mode()
 def test_aiter_c4a_prefill_topk_returns_sequence_local_indices() -> None:
     from vllm.v1.attention.ops.rocm_aiter_mla_sparse import (
         _get_aiter_top_k_kernel,

@@ -481,6 +481,113 @@ def test_top_k_per_row_decode_gfx950_long_c4a_1d_seq_lens() -> None:
 
 @pytest.mark.skipif(not current_platform.is_rocm(), reason="This test requires ROCm")
 @torch.inference_mode()
+def test_top_k_per_row_decode_gfx950_topk2048_device_length_replay() -> None:
+    properties = torch.cuda.get_device_properties(0)
+    if not properties.gcnArchName.startswith("gfx950"):
+        pytest.skip("This test exercises the gfx950 launch configuration")
+
+    batch_size = 4
+    query_tokens = 4
+    num_rows = batch_size * query_tokens
+    stride = 262_144
+    top_k = 2048
+    seq_lens = torch.full(
+        (batch_size,), top_k + query_tokens - 1,
+        dtype=torch.int32, device="cuda",
+    )
+    logits = torch.randn(num_rows, stride, dtype=torch.float32, device="cuda")
+    logits[:, :top_k] = 1.0
+    logits[:, top_k:] = -1.0
+    indices = torch.empty((num_rows, top_k), dtype=torch.int32, device="cuda")
+
+    torch.cuda.synchronize()
+    graph = torch.cuda.CUDAGraph()
+    with torch.cuda.graph(graph):
+        torch.ops._C.top_k_per_row_decode(
+            logits,
+            query_tokens,
+            seq_lens,
+            indices,
+            num_rows,
+            logits.stride(0),
+            logits.stride(1),
+            top_k,
+        )
+
+    row_starts = torch.zeros(num_rows, dtype=torch.int32, device="cuda")
+    row_offsets = torch.arange(query_tokens, dtype=torch.int32, device="cuda")
+    for seq_len in (2051, 8195, 16387, 65539, 262144):
+        seq_lens.fill_(seq_len)
+        graph.replay()
+        torch.cuda.synchronize()
+        row_ends = (
+            seq_lens[:, None] - query_tokens + row_offsets + 1
+        ).reshape(-1)
+    validate_topk_against_reference(
+        logits,
+        indices,
+        row_starts,
+        row_ends,
+        top_k,
+        "gfx950 top-k 2048 device-length replay",
+    )
+
+
+@pytest.mark.skipif(not current_platform.is_rocm(), reason="This test requires ROCm")
+@torch.inference_mode()
+def test_top_k_per_row_decode_gfx950_topk2048_512_thread_replay() -> None:
+    properties = torch.cuda.get_device_properties(0)
+    if not properties.gcnArchName.startswith("gfx950"):
+        pytest.skip("This test exercises the gfx950 launch configuration")
+
+    batch_size = 64
+    query_tokens = 4
+    num_rows = batch_size * query_tokens
+    stride = 600_000
+    top_k = 2048
+    seq_lens = torch.full(
+        (batch_size,), stride, dtype=torch.int32, device="cuda"
+    )
+    logits = torch.randn(num_rows, stride, dtype=torch.float32, device="cuda")
+    logits[:, :top_k] = 1.0
+    logits[:, top_k:] = -1.0
+    indices = torch.empty((num_rows, top_k), dtype=torch.int32, device="cuda")
+
+    torch.cuda.synchronize()
+    graph = torch.cuda.CUDAGraph()
+    with torch.cuda.graph(graph):
+        torch.ops._C.top_k_per_row_decode(
+            logits,
+            query_tokens,
+            seq_lens,
+            indices,
+            num_rows,
+            logits.stride(0),
+            logits.stride(1),
+            top_k,
+        )
+
+    row_starts = torch.zeros(num_rows, dtype=torch.int32, device="cuda")
+    row_offsets = torch.arange(query_tokens, dtype=torch.int32, device="cuda")
+    for seq_len in (600_000, 262_144):
+        seq_lens.fill_(seq_len)
+        graph.replay()
+        torch.cuda.synchronize()
+        row_ends = (
+            seq_lens[:, None] - query_tokens + row_offsets + 1
+        ).reshape(-1)
+        validate_topk_against_reference(
+            logits,
+            indices,
+            row_starts,
+            row_ends,
+            top_k,
+            "gfx950 top-k 2048 512-thread replay",
+        )
+
+
+@pytest.mark.skipif(not current_platform.is_rocm(), reason="This test requires ROCm")
+@torch.inference_mode()
 def test_aiter_c4a_prefill_topk_returns_sequence_local_indices() -> None:
     from vllm.v1.attention.ops.rocm_aiter_mla_sparse import (
         _get_aiter_top_k_kernel,

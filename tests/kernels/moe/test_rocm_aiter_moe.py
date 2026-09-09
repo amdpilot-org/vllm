@@ -577,7 +577,10 @@ def test_aiter_moe_padding_env_var(
         assert envs.VLLM_ROCM_MOE_PADDING is moe_padding
 
 
-@pytest.mark.parametrize("dp_size,pcp_size", [(1, 1), (1, 2), (2, 1), (2, 2), (1, 4)])
+@pytest.mark.parametrize(
+    "dp_size,pcp_size",
+    [(1, 1), (1, 2), (2, 1), (2, 2), (1, 4), (2, 4)],
+)
 def test_aiter_shared_expert_topk_metadata_covers_dp_and_pcp(
     monkeypatch, dp_size: int, pcp_size: int
 ):

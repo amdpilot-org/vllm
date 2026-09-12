@@ -577,6 +577,126 @@ def test_aiter_moe_padding_env_var(
         assert envs.VLLM_ROCM_MOE_PADDING is moe_padding
 
 
+@pytest.mark.parametrize(
+    "dp_size,pcp_size",
+    [(1, 1), (1, 2), (2, 1), (2, 2), (1, 4), (2, 4)],
+)
+def test_aiter_shared_expert_topk_metadata_covers_dp_and_pcp(
+    monkeypatch, dp_size: int, pcp_size: int
+):
+    """AITER shared-expert routing must cover DP- and PCP-gathered tokens."""
+    from vllm._aiter_ops import rocm_aiter_ops
+    from vllm.model_executor.layers.fused_moe.config import FusedMoEParallelConfig
+    from vllm.model_executor.layers.fused_moe.expert_map_manager import (
+        ExpertMapManager,
+    )
+    from vllm.model_executor.layers.fused_moe.experts import rocm_aiter_moe
+    from vllm.model_executor.layers.fused_moe.experts.cpu_moe import grouped_topk
+
+    _assert_aiter_supported()
+    monkeypatch.setenv("VLLM_ROCM_USE_AITER", "1")
+    monkeypatch.setenv("VLLM_ROCM_USE_AITER_MOE", "1")
+    monkeypatch.setenv("VLLM_ROCM_USE_AITER_FUSION_SHARED_EXPERTS", "1")
+    _reload_envs()
+    rocm_aiter_ops.refresh_env_variables()
+
+    def reset_metadata():
+        rocm_aiter_moe.aiter_topK_meta_data = None
+        rocm_aiter_moe.init_aiter_topK_meta_data.cache_clear()
+
+    reset_metadata()
+    try:
+        parallel_config = FusedMoEParallelConfig(
+            tp_size=1,
+            pcp_size=pcp_size,
+            dp_size=dp_size,
+            ep_size=1,
+            tp_rank=0,
+            pcp_rank=0,
+            dp_rank=0,
+            ep_rank=0,
+            sp_size=1,
+            use_ep=False,
+            all2all_backend="allgather_reducescatter",
+            enable_eplb=False,
+        )
+        ExpertMapManager(
+            max_num_batched_tokens=7,
+            top_k=2,
+            global_num_experts=7,
+            num_redundant_experts=0,
+            num_expert_group=0,
+            moe_parallel_config=parallel_config,
+            placement_strategy="linear",
+            enable_eplb=False,
+            num_fused_shared_experts=1,
+            rocm_aiter_enabled=True,
+        )
+
+        metadata_weights, metadata_ids = rocm_aiter_moe.aiter_topK_meta_data
+        capacity = 7 * dp_size * pcp_size
+        assert metadata_weights.shape == (capacity, 3)
+        assert metadata_ids.shape == (capacity, 3)
+
+        set_random_seed(123)
+        hidden_states = torch.randn(capacity, 256, device="cuda", dtype=torch.bfloat16)
+        router_logits = torch.randn(capacity, 7, device="cuda", dtype=torch.float32)
+        actual_weights, actual_ids = rocm_aiter_moe.rocm_aiter_grouped_topk(
+            hidden_states,
+            router_logits,
+            topk=2,
+            renormalize=True,
+            num_expert_group=1,
+            topk_group=1,
+            num_fused_shared_experts=1,
+        )
+        expected_weights, expected_ids = grouped_topk(
+            hidden_states,
+            router_logits,
+            topk=2,
+            renormalize=True,
+            num_expert_group=1,
+            topk_group=1,
+        )
+        torch.testing.assert_close(actual_weights[:, :2].cpu(), expected_weights.cpu())
+        torch.testing.assert_close(actual_ids[:, :2].cpu(), expected_ids.cpu())
+
+        w1 = torch.randn(8, 1024, 256, device="cuda", dtype=torch.bfloat16) / 16
+        w2 = torch.randn(8, 256, 512, device="cuda", dtype=torch.bfloat16) / 16
+        output = _run_fused_moe(
+            hidden_states,
+            w1,
+            w2,
+            actual_weights,
+            actual_ids,
+            activation_method=int(rocm_aiter_moe.ActivationMethod.SILU),
+            quant_method=int(rocm_aiter_moe.QuantMethod.NO),
+        )
+        reference = ref_moe_forward(hidden_states, w1, w2, actual_weights, actual_ids)
+        _assert_close_budget(
+            output.float(),
+            reference,
+            label=(f"shared_expert_pcp dp={dp_size} pcp={pcp_size} tokens={capacity}"),
+            atol=0.05,
+        )
+
+        with pytest.raises(
+            AssertionError,
+            match=f"support {capacity} tokens.*but got {capacity + 1} tokens",
+        ):
+            rocm_aiter_moe.rocm_aiter_grouped_topk(
+                torch.randn(capacity + 1, 256, device="cuda", dtype=torch.bfloat16),
+                torch.randn(capacity + 1, 7, device="cuda"),
+                topk=2,
+                renormalize=True,
+                num_expert_group=1,
+                topk_group=1,
+                num_fused_shared_experts=1,
+            )
+    finally:
+        reset_metadata()
+
+
 # Enum tests --------------------------------------------------------------
 
 
